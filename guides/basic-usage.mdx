@@ -1,0 +1,320 @@
+---
+title: Basic usage
+description: Common usage patterns and examples for jsonlogic2sql
+---
+
+This guide covers common usage patterns for converting JSON Logic expressions to SQL WHERE clauses.
+
+## Installation
+
+Install the library using Go modules:
+
+```bash
+go get github.com/h22rana/jsonlogic2sql@latest
+```
+
+**Prerequisites:** Go 1.19 or later
+
+## Quick start
+
+The simplest way to use jsonlogic2sql is with the package-level `Transpile` function:
+
+```go
+package main
+
+import (
+    "fmt"
+    "github.com/h22rana/jsonlogic2sql"
+)
+
+func main() {
+    sql, err := jsonlogic2sql.Transpile(
+        jsonlogic2sql.DialectBigQuery,
+        `{">": [{"var": "amount"}, 1000]}`,
+    )
+    if err != nil {
+        panic(err)
+    }
+    fmt.Println(sql) // Output: WHERE amount > 1000
+}
+```
+
+## Creating a transpiler instance
+
+For repeated transpilation or when using custom operators, create a transpiler instance:
+
+```go
+transpiler, err := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery)
+if err != nil {
+    panic(err)
+}
+
+// Simple comparison
+sql, err := transpiler.Transpile(`{"==": [{"var": "status"}, "pending"]}`)
+// Output: WHERE status = 'pending'
+
+// Complex nested conditions
+sql, err = transpiler.Transpile(`{
+    "and": [
+        {"==": [{"var": "status"}, "pending"]},
+        {">": [{"var": "amount"}, 5000]}
+    ]
+}`)
+// Output: WHERE (status = 'pending' AND amount > 5000)
+```
+
+## Working with different input formats
+
+jsonlogic2sql supports three input formats:
+
+<CodeGroup>
+
+```go JSON string
+sql, err := transpiler.Transpile(`{">": [{"var": "amount"}, 1000]}`)
+```
+
+```go Pre-parsed map
+logic := map[string]interface{}{
+    "or": []interface{}{
+        map[string]interface{}{">": []interface{}{map[string]interface{}{"var": "failedAttempts"}, 5}},
+        map[string]interface{}{"in": []interface{}{map[string]interface{}{"var": "country"}, []interface{}{"CN", "RU"}}},
+    },
+}
+sql, err := transpiler.TranspileFromMap(logic)
+// Output: WHERE (failedAttempts >= 5 OR country IN ('CN', 'RU'))
+```
+
+```go Any interface{}
+var logic interface{}
+json.Unmarshal(jsonData, &logic)
+sql, err := transpiler.TranspileFromInterface(logic)
+```
+
+</CodeGroup>
+
+## Transpiling conditions without WHERE
+
+Use `TranspileCondition` methods when you need to embed the condition in a larger query:
+
+```go
+// Returns just the condition without "WHERE"
+condition, err := jsonlogic2sql.TranspileCondition(
+    jsonlogic2sql.DialectBigQuery,
+    `{">": [{"var": "amount"}, 1000]}`,
+)
+// condition = "amount > 1000"
+
+// Use in a custom query
+query := fmt.Sprintf(
+    "SELECT * FROM orders WHERE %s AND created_at > '2024-01-01'",
+    condition,
+)
+```
+
+<Tip>
+The `TranspileCondition` family of methods is useful when building complex queries programmatically or when combining JSON Logic with other SQL conditions.
+</Tip>
+
+## Choosing a SQL dialect
+
+jsonlogic2sql supports multiple SQL dialects. You must specify a dialect when creating a transpiler:
+
+| Dialect | Constant | Description |
+|---------|----------|-------------|
+| Google BigQuery | `DialectBigQuery` | Google BigQuery SQL |
+| Google Cloud Spanner | `DialectSpanner` | Cloud Spanner SQL |
+| PostgreSQL | `DialectPostgreSQL` | PostgreSQL SQL |
+| DuckDB | `DialectDuckDB` | DuckDB SQL |
+| ClickHouse | `DialectClickHouse` | ClickHouse SQL |
+
+```go
+// BigQuery
+transpiler, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery)
+
+// PostgreSQL
+transpiler, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectPostgreSQL)
+
+// ClickHouse
+transpiler, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectClickHouse)
+```
+
+Different dialects generate different SQL for certain operators. For example, array operations use `UNNEST` in BigQuery but `ANY` in PostgreSQL.
+
+## Common patterns
+
+### Comparison operators
+
+```go
+// Greater than
+sql, _ := transpiler.Transpile(`{">": [{"var": "amount"}, 1000]}`)
+// WHERE amount > 1000
+
+// Equality
+sql, _ = transpiler.Transpile(`{"==": [{"var": "status"}, "active"]}`)
+// WHERE status = 'active'
+
+// Not equal
+sql, _ = transpiler.Transpile(`{"!=": [{"var": "status"}, "inactive"]}`)
+// WHERE status != 'inactive'
+```
+
+### Logical operators
+
+```go
+// AND
+sql, _ := transpiler.Transpile(`{
+    "and": [
+        {">": [{"var": "amount"}, 5000]},
+        {"==": [{"var": "status"}, "pending"]}
+    ]
+}`)
+// WHERE (amount > 5000 AND status = 'pending')
+
+// OR
+sql, _ = transpiler.Transpile(`{
+    "or": [
+        {">=": [{"var": "failedAttempts"}, 5]},
+        {"in": [{"var": "country"}, ["CN", "RU"]]}
+    ]
+}`)
+// WHERE (failedAttempts >= 5 OR country IN ('CN', 'RU'))
+
+// NOT
+sql, _ = transpiler.Transpile(`{"!": [{"var": "isDeleted"}]}`)
+// WHERE NOT (isDeleted)
+```
+
+### Nested conditions
+
+```go
+sql, _ := transpiler.Transpile(`{
+    "and": [
+        {">": [{"var": "transaction.amount"}, 10000]},
+        {
+            "or": [
+                {"==": [{"var": "user.verified"}, false]},
+                {"<": [{"var": "user.accountAgeDays"}, 7]}
+            ]
+        }
+    ]
+}`)
+// WHERE (transaction.amount > 10000 AND (user.verified = FALSE OR user.accountAgeDays < 7))
+```
+
+### Conditional expressions
+
+```go
+sql, _ := transpiler.Transpile(`{
+    "if": [
+        {">": [{"var": "age"}, 18]},
+        "adult",
+        "minor"
+    ]
+}`)
+// WHERE CASE WHEN age > 18 THEN 'adult' ELSE 'minor' END
+```
+
+### Array operations
+
+```go
+// IN operator
+sql, _ := transpiler.Transpile(`{
+    "in": [{"var": "country"}, ["US", "CA", "MX"]]
+}`)
+// WHERE country IN ('US', 'CA', 'MX')
+
+// Check if some elements match
+sql, _ = transpiler.Transpile(`{
+    "some": [
+        {"var": "statuses"},
+        {"==": [{"var": ""}, "active"]}
+    ]
+}`)
+// WHERE EXISTS (SELECT 1 FROM UNNEST(statuses) AS elem WHERE elem = 'active')
+```
+
+### String operations
+
+```go
+// Concatenation
+sql, _ := transpiler.Transpile(`{
+    "cat": [{"var": "firstName"}, " ", {"var": "lastName"}]
+}`)
+// WHERE CONCAT(firstName, ' ', lastName)
+
+// Substring
+sql, _ = transpiler.Transpile(`{
+    "substr": [{"var": "email"}, 0, 10]
+}`)
+// WHERE SUBSTR(email, 1, 10)
+```
+
+### Null checks
+
+```go
+// IS NULL
+sql, _ := transpiler.Transpile(`{
+    "==": [{"var": "deleted_at"}, null]
+}`)
+// WHERE deleted_at IS NULL
+
+// IS NOT NULL
+sql, _ = transpiler.Transpile(`{
+    "!=": [{"var": "email"}, null]
+}`)
+// WHERE email IS NOT NULL
+```
+
+## Variable naming
+
+The transpiler preserves JSON Logic variable names as-is in the SQL output:
+
+- Dot notation is preserved: `transaction.amount` → `transaction.amount`
+- Nested variables: `user.account.age` → `user.account.age`
+- Simple variables remain unchanged: `amount` → `amount`
+
+This allows for proper JSON column access in databases that support it (like PostgreSQL with JSONB columns).
+
+## Real-world example: fraud detection
+
+```go
+sql, _ := transpiler.Transpile(`{
+    "and": [
+        {">": [{"var": "transaction.amount"}, 10000]},
+        {
+            "or": [
+                {"==": [{"var": "user.verified"}, false]},
+                {"<": [{"var": "user.accountAgeDays"}, 7]},
+                {">=": [{"var": "user.failedAttempts"}, 3]}
+            ]
+        },
+        {"in": [{"var": "user.country"}, ["high_risk_1", "high_risk_2"]]}
+    ]
+}`)
+```
+
+**Output:**
+```sql
+WHERE (
+    transaction.amount > 10000 AND 
+    (user.verified = FALSE OR user.accountAgeDays < 7 OR user.failedAttempts >= 3) AND 
+    user.country IN ('high_risk_1', 'high_risk_2')
+)
+```
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Custom operators" icon="wrench" href="/guides/custom-operators">
+    Extend the library with your own SQL functions
+  </Card>
+  <Card title="Schema validation" icon="shield-check" href="/guides/schema-validation">
+    Add field validation and type checking
+  </Card>
+  <Card title="Error handling" icon="triangle-exclamation" href="/guides/error-handling">
+    Handle errors programmatically with error codes
+  </Card>
+  <Card title="REPL tool" icon="terminal" href="/guides/repl">
+    Test expressions interactively
+  </Card>
+</CardGroup>

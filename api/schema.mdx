@@ -1,0 +1,414 @@
+---
+title: Schema types
+description: Schema, FieldSchema, and FieldType for optional field validation and type checking
+---
+
+The schema system provides optional field validation and type checking for JSON Logic expressions. When a schema is provided, the transpiler validates field names and enforces type-appropriate operations.
+
+## Schema
+
+```go
+type Schema struct {
+    // Private fields - use methods to interact
+}
+```
+
+Represents a collection of field schemas for validation. Create instances using [NewSchema()](#newschema), [NewSchemaFromJSON()](#newschemafromjson), or [NewSchemaFromFile()](#newschemafromfile).
+
+### Creation functions
+
+#### NewSchema
+
+```go
+func NewSchema(fields []FieldSchema) *Schema
+```
+
+Creates a new schema from a slice of field schemas.
+
+<ParamField path="fields" type="[]FieldSchema" required>
+  Slice of field definitions
+</ParamField>
+
+<ResponseField name="return" type="*Schema">
+  New schema instance
+</ResponseField>
+
+**Example:**
+
+```go
+schema := jsonlogic2sql.NewSchema([]jsonlogic2sql.FieldSchema{
+    {Name: "user_id", Type: jsonlogic2sql.FieldTypeInteger},
+    {Name: "email", Type: jsonlogic2sql.FieldTypeString},
+    {Name: "amount", Type: jsonlogic2sql.FieldTypeNumber},
+    {Name: "tags", Type: jsonlogic2sql.FieldTypeArray},
+    {Name: "status", Type: jsonlogic2sql.FieldTypeEnum, AllowedValues: []string{"active", "pending", "inactive"}},
+})
+```
+
+#### NewSchemaFromJSON
+
+```go
+func NewSchemaFromJSON(data []byte) (*Schema, error)
+```
+
+Creates a new schema from a JSON byte slice.
+
+<ParamField path="data" type="[]byte" required>
+  JSON-encoded array of field schemas
+</ParamField>
+
+<ResponseField name="return" type="(*Schema, error)">
+  New schema instance and error if JSON is invalid
+</ResponseField>
+
+**Example:**
+
+```go
+jsonData := []byte(`[
+    {"name": "email", "type": "string"},
+    {"name": "age", "type": "integer"},
+    {"name": "status", "type": "enum", "allowedValues": ["active", "inactive"]}
+]`)
+
+schema, err := jsonlogic2sql.NewSchemaFromJSON(jsonData)
+if err != nil {
+    log.Fatal(err)
+}
+```
+
+#### NewSchemaFromFile
+
+```go
+func NewSchemaFromFile(filepath string) (*Schema, error)
+```
+
+Loads a schema from a JSON file.
+
+<ParamField path="filepath" type="string" required>
+  Path to JSON file containing field schemas
+</ParamField>
+
+<ResponseField name="return" type="(*Schema, error)">
+  New schema instance and error if file cannot be read or JSON is invalid
+</ResponseField>
+
+**Example:**
+
+```go
+schema, err := jsonlogic2sql.NewSchemaFromFile("./schema.json")
+if err != nil {
+    log.Fatal(err)
+}
+```
+
+### Validation methods
+
+#### HasField
+
+```go
+func (s *Schema) HasField(fieldName string) bool
+```
+
+Checks if a field exists in the schema.
+
+<ParamField path="fieldName" type="string" required>
+  Name of the field to check
+</ParamField>
+
+<ResponseField name="return" type="bool">
+  `true` if the field exists, `false` otherwise. Returns `true` for all fields if schema is `nil`.
+</ResponseField>
+
+#### ValidateField
+
+```go
+func (s *Schema) ValidateField(fieldName string) error
+```
+
+Checks if a field exists in the schema and returns an error if not.
+
+<ParamField path="fieldName" type="string" required>
+  Name of the field to validate
+</ParamField>
+
+<ResponseField name="return" type="error">
+  Error if field is not defined in schema, `nil` otherwise (or if schema is `nil`)
+</ResponseField>
+
+#### ValidateEnumValue
+
+```go
+func (s *Schema) ValidateEnumValue(fieldName, value string) error
+```
+
+Checks if a value is valid for an enum field.
+
+<ParamField path="fieldName" type="string" required>
+  Name of the enum field
+</ParamField>
+
+<ParamField path="value" type="string" required>
+  Value to validate
+</ParamField>
+
+<ResponseField name="return" type="error">
+  Error if value is not in the allowed values list, `nil` if valid (or if field is not an enum, or schema is `nil`)
+</ResponseField>
+
+**Example:**
+
+```go
+err := schema.ValidateEnumValue("status", "active")
+// nil - "active" is allowed
+
+err = schema.ValidateEnumValue("status", "invalid")
+// Error: invalid enum value 'invalid' for field 'status': allowed values are [active pending inactive]
+```
+
+### Field query methods
+
+#### GetFields
+
+```go
+func (s *Schema) GetFields() []string
+```
+
+Returns all field names in the schema.
+
+<ResponseField name="return" type="[]string">
+  Slice of all field names, or `nil` if schema is `nil`
+</ResponseField>
+
+#### GetFieldType
+
+```go
+func (s *Schema) GetFieldType(fieldName string) string
+```
+
+Returns the type of a field as a string.
+
+<ParamField path="fieldName" type="string" required>
+  Name of the field
+</ParamField>
+
+<ResponseField name="return" type="string">
+  Type as string ("string", "integer", etc.), or empty string if field doesn't exist or schema is `nil`
+</ResponseField>
+
+#### GetAllowedValues
+
+```go
+func (s *Schema) GetAllowedValues(fieldName string) []string
+```
+
+Returns the allowed values for an enum field.
+
+<ParamField path="fieldName" type="string" required>
+  Name of the enum field
+</ParamField>
+
+<ResponseField name="return" type="[]string">
+  Slice of allowed values, or `nil` if field is not an enum, doesn't exist, or schema is `nil`
+</ResponseField>
+
+### Type checking methods
+
+#### IsArrayType
+
+```go
+func (s *Schema) IsArrayType(fieldName string) bool
+```
+
+Checks if a field is of array type.
+
+#### IsStringType
+
+```go
+func (s *Schema) IsStringType(fieldName string) bool
+```
+
+Checks if a field is of string type.
+
+#### IsNumericType
+
+```go
+func (s *Schema) IsNumericType(fieldName string) bool
+```
+
+Checks if a field is of numeric type (integer or number).
+
+#### IsBooleanType
+
+```go
+func (s *Schema) IsBooleanType(fieldName string) bool
+```
+
+Checks if a field is of boolean type.
+
+#### IsEnumType
+
+```go
+func (s *Schema) IsEnumType(fieldName string) bool
+```
+
+Checks if a field is of enum type.
+
+**Example:**
+
+```go
+if schema.IsNumericType("amount") {
+    fmt.Println("Can perform arithmetic operations on amount")
+}
+
+if schema.IsEnumType("status") {
+    allowed := schema.GetAllowedValues("status")
+    fmt.Printf("Status must be one of: %v\n", allowed)
+}
+```
+
+## FieldSchema
+
+```go
+type FieldSchema struct {
+    Name          string    `json:"name"`
+    Type          FieldType `json:"type"`
+    AllowedValues []string  `json:"allowedValues,omitempty"` // For enum types only
+}
+```
+
+Represents the schema/metadata for a single field.
+
+<ParamField path="Name" type="string" required>
+  Field name (e.g., "email", "user.age", "order.items")
+</ParamField>
+
+<ParamField path="Type" type="FieldType" required>
+  Field type constant (FieldTypeString, FieldTypeInteger, etc.)
+</ParamField>
+
+<ParamField path="AllowedValues" type="[]string">
+  For enum types: list of valid values. Required for FieldTypeEnum, ignored for other types.
+</ParamField>
+
+**Example:**
+
+```go
+fields := []jsonlogic2sql.FieldSchema{
+    {
+        Name: "status",
+        Type: jsonlogic2sql.FieldTypeEnum,
+        AllowedValues: []string{"active", "pending", "completed", "cancelled"},
+    },
+    {
+        Name: "amount",
+        Type: jsonlogic2sql.FieldTypeNumber,
+    },
+    {
+        Name: "tags",
+        Type: jsonlogic2sql.FieldTypeArray,
+    },
+}
+```
+
+## FieldType
+
+```go
+type FieldType string
+```
+
+Represents the type of a field in the schema.
+
+**Constants:**
+
+<ParamField path="FieldTypeString" type="FieldType">
+  String field type - for text fields
+</ParamField>
+
+<ParamField path="FieldTypeInteger" type="FieldType">
+  Integer field type - for whole numbers
+</ParamField>
+
+<ParamField path="FieldTypeNumber" type="FieldType">
+  Numeric field type - for floating-point or decimal numbers
+</ParamField>
+
+<ParamField path="FieldTypeBoolean" type="FieldType">
+  Boolean field type - for true/false values
+</ParamField>
+
+<ParamField path="FieldTypeArray" type="FieldType">
+  Array field type - for array/list fields
+</ParamField>
+
+<ParamField path="FieldTypeObject" type="FieldType">
+  Object/struct field type - for nested objects
+</ParamField>
+
+<ParamField path="FieldTypeEnum" type="FieldType">
+  Enum field type - for fields with a fixed set of allowed values. Requires `AllowedValues` in FieldSchema.
+</ParamField>
+
+**Example:**
+
+```go
+schema := jsonlogic2sql.NewSchema([]jsonlogic2sql.FieldSchema{
+    {Name: "name", Type: jsonlogic2sql.FieldTypeString},
+    {Name: "age", Type: jsonlogic2sql.FieldTypeInteger},
+    {Name: "balance", Type: jsonlogic2sql.FieldTypeNumber},
+    {Name: "active", Type: jsonlogic2sql.FieldTypeBoolean},
+    {Name: "tags", Type: jsonlogic2sql.FieldTypeArray},
+    {Name: "metadata", Type: jsonlogic2sql.FieldTypeObject},
+    {Name: "role", Type: jsonlogic2sql.FieldTypeEnum, AllowedValues: []string{"admin", "user", "guest"}},
+})
+```
+
+## Schema validation behavior
+
+When a schema is provided to the transpiler:
+
+### Field validation
+
+- The `var` operator validates that referenced fields exist in the schema
+- Returns error code `E201` (ErrFieldNotInSchema) if field is not defined
+
+### Enum validation
+
+- Equality comparisons (`==`, `===`) with enum fields validate values
+- Returns error code `E203` (ErrInvalidEnumValue) if value is not in AllowedValues
+
+### Type-aware operations
+
+- The `!!` (double negation) operator generates type-appropriate SQL based on field type
+- Array operations validate that fields are actually arrays
+
+### Example with validation
+
+```go
+schema := jsonlogic2sql.NewSchema([]jsonlogic2sql.FieldSchema{
+    {Name: "status", Type: jsonlogic2sql.FieldTypeEnum, AllowedValues: []string{"active", "inactive"}},
+})
+
+config := &jsonlogic2sql.TranspilerConfig{
+    Dialect: jsonlogic2sql.DialectBigQuery,
+    Schema:  schema,
+}
+
+transpiler, _ := jsonlogic2sql.NewTranspilerWithConfig(config)
+
+// Valid - field exists and value is allowed
+sql, _ := transpiler.Transpile(`{"==": [{"var": "status"}, "active"]}`)
+
+// Error: field not in schema
+_, err := transpiler.Transpile(`{"==": [{"var": "unknown"}, "value"]}`)
+// [E201] field 'unknown' is not defined in schema
+
+// Error: invalid enum value
+_, err = transpiler.Transpile(`{"==": [{"var": "status"}, "invalid"]}`)
+// [E203] invalid enum value 'invalid' for field 'status': allowed values are [active inactive]
+```
+
+## See also
+
+- [Transpiler.SetSchema()](/api/transpiler#setschema) - Set schema on existing transpiler
+- [TranspilerConfig](/api/types#transpilerconfig) - Configuration with schema
+- [Error codes](/api/errors#errorcode) - Schema-related error codes (E201-E203)

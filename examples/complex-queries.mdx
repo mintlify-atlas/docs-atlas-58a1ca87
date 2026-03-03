@@ -1,0 +1,437 @@
+---
+title: Complex queries
+description: Multi-condition queries and deeply nested expressions
+---
+
+This guide demonstrates complex, real-world query patterns with multiple conditions and nested logic.
+
+## Nested AND/OR conditions
+
+### Transaction fraud detection
+
+Combine multiple risk factors:
+
+<CodeGroup>
+```json JSON Logic
+{
+  "and": [
+    {">": [{"var": "transaction.amount"}, 10000]},
+    {
+      "or": [
+        {"==": [{"var": "user.verified"}, false]},
+        {"<": [{"var": "user.accountAgeDays"}, 7]}
+      ]
+    }
+  ]
+}
+```
+
+```sql SQL Output
+WHERE (transaction.amount > 10000 AND (user.verified = FALSE OR user.accountAgeDays < 7))
+```
+</CodeGroup>
+
+### Multi-factor eligibility check
+
+<CodeGroup>
+```json JSON Logic
+{
+  "and": [
+    {"in": [{"var": "status"}, ["active", "pending"]]},
+    {"!": [{"missing": "email"}]},
+    {">=": [{"var": "score"}, 80]}
+  ]
+}
+```
+
+```sql SQL Output
+WHERE (status IN ('active', 'pending') AND NOT (email IS NULL) AND score >= 80)
+```
+</CodeGroup>
+
+## Arithmetic in comparisons
+
+### Price calculation with bonus
+
+<CodeGroup>
+```json JSON Logic
+{
+  ">": [
+    {"+": [{"var": "base"}, {"*": [{"var": "bonus"}, 0.1]}]},
+    1000
+  ]
+}
+```
+
+```sql SQL Output
+WHERE (base + (bonus * 0.1)) > 1000
+```
+</CodeGroup>
+
+### Discount threshold check
+
+<CodeGroup>
+```json JSON Logic
+{
+  "and": [
+    {">": [{"var": "totalPrice"}, 100]},
+    {"<": [{"var": "totalQuantity"}, 1000]}
+  ]
+}
+```
+
+```sql SQL Output
+WHERE (totalPrice > 100 AND totalQuantity < 1000)
+```
+</CodeGroup>
+
+## Nested conditionals
+
+### Multi-tier pricing
+
+<CodeGroup>
+```json JSON Logic
+{
+  "if": [
+    {">": [{"var": "qty"}, 100]},
+    {"*": [{"var": "price"}, 0.9]},
+    {"*": [{"var": "price"}, 1.0]}
+  ]
+}
+```
+
+```sql SQL Output
+WHERE CASE WHEN qty > 100 THEN (price * 0.9) ELSE (price * 1) END
+```
+</CodeGroup>
+
+### Multi-level approval logic
+
+<CodeGroup>
+```json JSON Logic
+{
+  "if": [
+    {
+      "and": [
+        {">=": [{"var": "age"}, 18]},
+        {"==": [{"var": "hasLicense"}, true]},
+        {"<": [{"var": "violations"}, 3]}
+      ]
+    },
+    "approved",
+    {
+      "if": [
+        {"<": [{"var": "age"}, 18]},
+        "too_young",
+        "rejected"
+      ]
+    }
+  ]
+}
+```
+
+```sql SQL Output
+WHERE CASE WHEN (age >= 18 AND hasLicense = TRUE AND violations < 3) THEN 'approved' ELSE CASE WHEN age < 18 THEN 'too_young' ELSE 'rejected' END END
+```
+</CodeGroup>
+
+### Conditional string formatting
+
+<CodeGroup>
+```json JSON Logic
+{
+  "cat": [
+    {
+      "if": [
+        {"==": [{"var": "gender"}, "M"]},
+        "Mr. ",
+        "Ms. "
+      ]
+    },
+    {"var": "first_name"},
+    " ",
+    {"var": "last_name"}
+  ]
+}
+```
+
+```sql SQL Output
+WHERE CONCAT(CASE WHEN (gender = 'M') THEN 'Mr. ' ELSE 'Ms. ' END, first_name, ' ', last_name)
+```
+</CodeGroup>
+
+## Array operations
+
+### Map transformation
+
+<CodeGroup>
+```json JSON Logic
+{"map": [{"var": "numbers"}, {"+": [{"var": "item"}, 1]}]}
+```
+
+```sql SQL Output (BigQuery/PostgreSQL/DuckDB)
+WHERE ARRAY(SELECT (elem + 1) FROM UNNEST(numbers) AS elem)
+```
+
+```sql SQL Output (ClickHouse)
+WHERE arrayMap(elem -> (elem + 1), numbers)
+```
+</CodeGroup>
+
+### Filter with condition
+
+<CodeGroup>
+```json JSON Logic
+{"filter": [{"var": "scores"}, {">": [{"var": "item"}, 70]}]}
+```
+
+```sql SQL Output (BigQuery/PostgreSQL/DuckDB)
+WHERE ARRAY(SELECT elem FROM UNNEST(scores) AS elem WHERE elem > 70)
+```
+
+```sql SQL Output (ClickHouse)
+WHERE arrayFilter(elem -> elem > 70, scores)
+```
+</CodeGroup>
+
+### Check all elements satisfy condition
+
+<CodeGroup>
+```json JSON Logic
+{"all": [{"var": "ages"}, {">=": [{"var": "item"}, 18]}]}
+```
+
+```sql SQL Output (BigQuery/PostgreSQL/DuckDB)
+WHERE NOT EXISTS (SELECT 1 FROM UNNEST(ages) AS elem WHERE NOT (elem >= 18))
+```
+
+```sql SQL Output (ClickHouse)
+WHERE arrayAll(elem -> elem >= 18, ages)
+```
+</CodeGroup>
+
+### Check some elements satisfy condition
+
+<CodeGroup>
+```json JSON Logic
+{"some": [{"var": "statuses"}, {"==": [{"var": "item"}, "active"]}]}
+```
+
+```sql SQL Output (BigQuery/PostgreSQL/DuckDB)
+WHERE EXISTS (SELECT 1 FROM UNNEST(statuses) AS elem WHERE elem = 'active')
+```
+
+```sql SQL Output (ClickHouse)
+WHERE arrayExists(elem -> elem = 'active', statuses)
+```
+</CodeGroup>
+
+### Sum array with reduce
+
+<CodeGroup>
+```json JSON Logic
+{
+  "reduce": [
+    {"var": "numbers"},
+    {"+": [{"var": "accumulator"}, {"var": "current"}]},
+    0
+  ]
+}
+```
+
+```sql SQL Output (BigQuery/PostgreSQL/DuckDB)
+WHERE 0 + COALESCE((SELECT SUM(elem) FROM UNNEST(numbers) AS elem), 0)
+```
+
+```sql SQL Output (ClickHouse)
+WHERE 0 + coalesce(arrayReduce('sum', numbers), 0)
+```
+</CodeGroup>
+
+## Deeply nested expressions
+
+### Complex fraud detection
+
+<CodeGroup>
+```json JSON Logic
+{
+  "and": [
+    {">": [{"var": "transaction.amount"}, 10000]},
+    {
+      "or": [
+        {"==": [{"var": "user.verified"}, false]},
+        {"<": [{"var": "user.accountAgeDays"}, 7]},
+        {">=": [{"var": "user.failedAttempts"}, 3]}
+      ]
+    },
+    {"in": [{"var": "user.country"}, ["high_risk_1", "high_risk_2"]]}
+  ]
+}
+```
+
+```sql SQL Output
+WHERE (transaction.amount > 10000 AND (user.verified = FALSE OR user.accountAgeDays < 7 OR user.failedAttempts >= 3) AND user.country IN ('high_risk_1', 'high_risk_2'))
+```
+</CodeGroup>
+
+### Filter with nested conditions
+
+<CodeGroup>
+```json JSON Logic
+{
+  "filter": [
+    {"var": "products"},
+    {
+      "and": [
+        {">": [{"var": "price"}, 100]},
+        {"<": [{"var": "price"}, 1000]}
+      ]
+    }
+  ]
+}
+```
+
+```sql SQL Output
+WHERE ARRAY(SELECT elem FROM UNNEST(products) AS elem WHERE (price > 100 AND price < 1000))
+```
+</CodeGroup>
+
+### Array operations with nested logic
+
+<CodeGroup>
+```json JSON Logic
+{
+  "and": [
+    {"==": [{"var": "status"}, "active"]},
+    {
+      "some": [
+        {"var": "results"},
+        {
+          "and": [
+            {"==": [{"var": "product"}, "abc"]},
+            {">": [{"var": "score"}, 8]}
+          ]
+        }
+      ]
+    }
+  ]
+}
+```
+
+```sql SQL Output
+WHERE (status = 'active' AND EXISTS (SELECT 1 FROM UNNEST(results) AS elem WHERE (product = 'abc' AND score > 8)))
+```
+</CodeGroup>
+
+## Max/Min with nested operations
+
+### Nested max/min
+
+<CodeGroup>
+```json JSON Logic
+{
+  "max": [
+    {"min": [{"var": "a"}, {"var": "b"}]},
+    {"min": [{"var": "c"}, {"var": "d"}]}
+  ]
+}
+```
+
+```sql SQL Output
+WHERE GREATEST(LEAST(a, b), LEAST(c, d))
+```
+</CodeGroup>
+
+## Complex arithmetic
+
+### Nested arithmetic operations
+
+<CodeGroup>
+```json JSON Logic
+{
+  "+": [
+    {"*": [{"var": "price"}, {"var": "quantity"}]},
+    {"-": [{"var": "discount"}, {"%": [{"var": "tax"}, 10]}]}
+  ]
+}
+```
+
+```sql SQL Output
+WHERE ((price * quantity) + (discount - (tax % 10)))
+```
+</CodeGroup>
+
+### Calculation in conditional result
+
+<CodeGroup>
+```json JSON Logic
+{
+  "if": [
+    {">": [{"var": "x"}, 0]},
+    {"var": "positive"},
+    {"var": "negative"}
+  ]
+}
+```
+
+```sql SQL Output
+WHERE CASE WHEN x > 0 THEN positive ELSE negative END
+```
+</CodeGroup>
+
+## Comparison with concatenated strings
+
+<CodeGroup>
+```json JSON Logic
+{
+  "==": [
+    {"cat": [{"var": "firstName"}, " ", {"var": "lastName"}]},
+    "John Doe"
+  ]
+}
+```
+
+```sql SQL Output
+WHERE CONCAT(firstName, ' ', lastName) = 'John Doe'
+```
+</CodeGroup>
+
+## Chained comparisons with variables
+
+<CodeGroup>
+```json JSON Logic
+{"<": [{"var": "min"}, {"var": "value"}, {"var": "max"}]}
+```
+
+```sql SQL Output
+WHERE (min < value AND value < max)
+```
+</CodeGroup>
+
+## Combining missing checks with logic
+
+<CodeGroup>
+```json JSON Logic
+{
+  "and": [
+    {"!": [{"missing": "email"}]},
+    {"missing_some": [1, ["phone", "address"]]}
+  ]
+}
+```
+
+```sql SQL Output
+WHERE (NOT (email IS NULL) AND (phone IS NULL OR address IS NULL))
+```
+</CodeGroup>
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Custom operators" icon="wrench" href="/examples/custom-operators">
+    Create custom operators for domain-specific logic
+  </Card>
+  <Card title="Schema validation" icon="shield-check" href="/examples/schema-validation">
+    Validate fields against a schema
+  </Card>
+</CardGroup>

@@ -1,0 +1,279 @@
+---
+title: Package-level functions
+description: Convenience functions for quick transpilation and transpiler creation
+---
+
+Package-level functions provide quick access to transpilation without manually creating a Transpiler instance. For advanced use cases like custom operators or schema validation, use [NewTranspiler()](#newtranspiler) or [NewTranspilerWithConfig()](#newtranspilerwithconfig) to create a reusable instance.
+
+## Transpilation functions
+
+### Transpile
+
+```go
+func Transpile(d Dialect, jsonLogic string) (string, error)
+```
+
+Converts a JSON Logic string to a SQL WHERE clause. This is the simplest way to transpile JSON Logic.
+
+<ParamField path="d" type="Dialect" required>
+  Target SQL dialect (use `DialectBigQuery`, `DialectSpanner`, `DialectPostgreSQL`, `DialectDuckDB`, or `DialectClickHouse`)
+</ParamField>
+
+<ParamField path="jsonLogic" type="string" required>
+  JSON Logic expression as a string
+</ParamField>
+
+<ResponseField name="return" type="(string, error)">
+  SQL WHERE clause (including `WHERE` keyword) and any error encountered
+</ResponseField>
+
+**Example:**
+
+```go
+import "github.com/h22rana/jsonlogic2sql"
+
+sql, err := jsonlogic2sql.Transpile(
+    jsonlogic2sql.DialectBigQuery,
+    `{"==": [{"var": "status"}, "active"]}`,
+)
+if err != nil {
+    log.Fatal(err)
+}
+fmt.Println(sql) // WHERE status = 'active'
+```
+
+### TranspileFromMap
+
+```go
+func TranspileFromMap(d Dialect, logic map[string]interface{}) (string, error)
+```
+
+Converts a pre-parsed JSON Logic map to a SQL WHERE clause. Use this when you already have the JSON Logic parsed into a Go map.
+
+<ParamField path="d" type="Dialect" required>
+  Target SQL dialect
+</ParamField>
+
+<ParamField path="logic" type="map[string]interface{}" required>
+  Pre-parsed JSON Logic expression
+</ParamField>
+
+<ResponseField name="return" type="(string, error)">
+  SQL WHERE clause (including `WHERE` keyword) and any error encountered
+</ResponseField>
+
+**Example:**
+
+```go
+logic := map[string]interface{}{
+    ">": []interface{}{map[string]interface{}{"var": "amount"}, 1000},
+}
+sql, err := jsonlogic2sql.TranspileFromMap(jsonlogic2sql.DialectBigQuery, logic)
+// Result: WHERE amount > 1000
+```
+
+### TranspileFromInterface
+
+```go
+func TranspileFromInterface(d Dialect, logic interface{}) (string, error)
+```
+
+Converts any JSON Logic interface{} to a SQL WHERE clause. Use this when working with generic JSON unmarshaling.
+
+<ParamField path="d" type="Dialect" required>
+  Target SQL dialect
+</ParamField>
+
+<ParamField path="logic" type="interface{}" required>
+  JSON Logic expression as any type (typically from `json.Unmarshal`)
+</ParamField>
+
+<ResponseField name="return" type="(string, error)">
+  SQL WHERE clause (including `WHERE` keyword) and any error encountered
+</ResponseField>
+
+**Example:**
+
+```go
+var logic interface{}
+json.Unmarshal([]byte(`{"==": [{"var": "status"}, "active"]}`), &logic)
+sql, err := jsonlogic2sql.TranspileFromInterface(jsonlogic2sql.DialectBigQuery, logic)
+```
+
+### TranspileCondition
+
+```go
+func TranspileCondition(d Dialect, jsonLogic string) (string, error)
+```
+
+Converts a JSON Logic string to a SQL condition **without** the WHERE keyword. Useful when embedding conditions in larger queries.
+
+<ParamField path="d" type="Dialect" required>
+  Target SQL dialect
+</ParamField>
+
+<ParamField path="jsonLogic" type="string" required>
+  JSON Logic expression as a string
+</ParamField>
+
+<ResponseField name="return" type="(string, error)">
+  SQL condition (without `WHERE` keyword) and any error encountered
+</ResponseField>
+
+**Example:**
+
+```go
+condition, err := jsonlogic2sql.TranspileCondition(
+    jsonlogic2sql.DialectBigQuery,
+    `{"and": [{">": [{"var": "amount"}, 1000]}, {"==": [{"var": "status"}, "pending"]}]}`,
+)
+// Result: (amount > 1000 AND status = 'pending')
+
+// Use in larger query:
+query := fmt.Sprintf("SELECT * FROM orders WHERE active = true AND %s", condition)
+```
+
+### TranspileConditionFromMap
+
+```go
+func TranspileConditionFromMap(d Dialect, logic map[string]interface{}) (string, error)
+```
+
+Converts a pre-parsed JSON Logic map to a SQL condition without the WHERE keyword.
+
+<ParamField path="d" type="Dialect" required>
+  Target SQL dialect
+</ParamField>
+
+<ParamField path="logic" type="map[string]interface{}" required>
+  Pre-parsed JSON Logic expression
+</ParamField>
+
+<ResponseField name="return" type="(string, error)">
+  SQL condition (without `WHERE` keyword) and any error encountered
+</ResponseField>
+
+### TranspileConditionFromInterface
+
+```go
+func TranspileConditionFromInterface(d Dialect, logic interface{}) (string, error)
+```
+
+Converts any JSON Logic interface{} to a SQL condition without the WHERE keyword.
+
+<ParamField path="d" type="Dialect" required>
+  Target SQL dialect
+</ParamField>
+
+<ParamField path="logic" type="interface{}" required>
+  JSON Logic expression as any type
+</ParamField>
+
+<ResponseField name="return" type="(string, error)">
+  SQL condition (without `WHERE` keyword) and any error encountered
+</ResponseField>
+
+## Transpiler creation functions
+
+### NewTranspiler
+
+```go
+func NewTranspiler(d Dialect) (*Transpiler, error)
+```
+
+Creates a new transpiler instance with the specified dialect. Use this when you need to:
+- Register custom operators
+- Reuse the same transpiler for multiple conversions
+- Add schema validation later with `SetSchema()`
+
+<ParamField path="d" type="Dialect" required>
+  Target SQL dialect (use `DialectBigQuery`, `DialectSpanner`, `DialectPostgreSQL`, `DialectDuckDB`, or `DialectClickHouse`)
+</ParamField>
+
+<ResponseField name="return" type="(*Transpiler, error)">
+  Transpiler instance and error if dialect is invalid
+</ResponseField>
+
+**Example:**
+
+```go
+transpiler, err := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery)
+if err != nil {
+    log.Fatal(err)
+}
+
+// Reuse transpiler for multiple conversions
+sql1, _ := transpiler.Transpile(`{"==": [{"var": "status"}, "active"]}`)
+sql2, _ := transpiler.Transpile(`{">": [{"var": "amount"}, 1000]}`)
+```
+
+### NewTranspilerWithConfig
+
+```go
+func NewTranspilerWithConfig(config *TranspilerConfig) (*Transpiler, error)
+```
+
+Creates a new transpiler instance with custom configuration. Use this when you need schema validation at creation time.
+
+<ParamField path="config" type="*TranspilerConfig" required>
+  Configuration with dialect and optional schema
+</ParamField>
+
+<ResponseField name="return" type="(*Transpiler, error)">
+  Transpiler instance and error if config is invalid or nil
+</ResponseField>
+
+**Example:**
+
+```go
+schema := jsonlogic2sql.NewSchema([]jsonlogic2sql.FieldSchema{
+    {Name: "amount", Type: jsonlogic2sql.FieldTypeNumber},
+    {Name: "status", Type: jsonlogic2sql.FieldTypeEnum, AllowedValues: []string{"active", "pending", "completed"}},
+})
+
+config := &jsonlogic2sql.TranspilerConfig{
+    Dialect: jsonlogic2sql.DialectBigQuery,
+    Schema:  schema,
+}
+
+transpiler, err := jsonlogic2sql.NewTranspilerWithConfig(config)
+if err != nil {
+    log.Fatal(err)
+}
+
+// Schema validation is automatically applied
+sql, err := transpiler.Transpile(`{"==": [{"var": "status"}, "active"]}`)
+// Valid - "active" is an allowed value
+
+sql, err = transpiler.Transpile(`{"==": [{"var": "status"}, "invalid"]}`)
+// Error: invalid enum value 'invalid' for field 'status'
+```
+
+## Helper functions
+
+### NewOperatorRegistry
+
+```go
+func NewOperatorRegistry() *OperatorRegistry
+```
+
+Creates a new empty operator registry for managing custom operators. Typically used internally by transpiler instances, but can be used for advanced operator management.
+
+<ResponseField name="return" type="*OperatorRegistry">
+  New empty operator registry
+</ResponseField>
+
+**Example:**
+
+```go
+registry := jsonlogic2sql.NewOperatorRegistry()
+registry.RegisterFunc("length", func(op string, args []interface{}) (string, error) {
+    return fmt.Sprintf("LENGTH(%s)", args[0]), nil
+})
+```
+
+## See also
+
+- [Transpiler methods](/api/transpiler) - Full transpiler API for custom operators and schema
+- [Type definitions](/api/types) - TranspilerConfig, Dialect, and other types
+- [Schema validation](/api/schema) - Optional schema support for field validation

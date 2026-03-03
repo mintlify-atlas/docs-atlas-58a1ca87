@@ -1,0 +1,407 @@
+---
+title: String operators
+description: String concatenation (cat), substring extraction (substr), and containment checking (in)
+---
+
+String operators provide concatenation, substring extraction, and substring search capabilities.
+
+## cat
+
+Concatenates multiple strings into a single string.
+
+**JSON Logic:**
+```json
+{"cat": [{"var": "firstName"}, " ", {"var": "lastName"}]}
+```
+
+**SQL output (BigQuery/Spanner):**
+```sql
+WHERE CONCAT(firstName, ' ', lastName)
+```
+
+**SQL output (PostgreSQL):**
+```sql
+WHERE CONCAT(firstName, ' ', lastName)
+```
+
+<ParamField path="cat" type="[string1, string2, ...]" required>
+  Array of strings to concatenate (can include variables, literals, or expressions)
+</ParamField>
+
+### Concatenate literals
+
+**JSON Logic:**
+```json
+{"cat": ["Hello", " ", "World"]}
+```
+```sql
+WHERE CONCAT('Hello', ' ', 'World')
+```
+
+### Concatenate with variables
+
+**JSON Logic:**
+```json
+{"cat": ["User: ", {"var": "username"}]}
+```
+```sql
+WHERE CONCAT('User: ', username)
+```
+
+### Concatenate with conditional
+
+**JSON Logic:**
+```json
+{
+  "cat": [
+    {"if": [{"==": [{"var": "gender"}, "M"]}, "Mr. ", "Ms. "]},
+    {"var": "first_name"},
+    " ",
+    {"var": "last_name"}
+  ]
+}
+```
+
+**SQL output:**
+```sql
+WHERE CONCAT(CASE WHEN gender = 'M' THEN 'Mr. ' ELSE 'Ms. ' END, first_name, ' ', last_name)
+```
+
+Builds a formatted name with title based on gender.
+
+### Build URLs
+
+**JSON Logic:**
+```json
+{
+  "cat": [
+    "https://example.com/users/",
+    {"var": "user_id"},
+    "/profile"
+  ]
+}
+```
+```sql
+WHERE CONCAT('https://example.com/users/', user_id, '/profile')
+```
+
+### Empty string handling
+
+**JSON Logic:**
+```json
+{"cat": [{"var": "prefix"}, {"var": "name"}, {"var": "suffix"}]}
+```
+```sql
+WHERE CONCAT(prefix, name, suffix)
+```
+
+If any variable is NULL, SQL `CONCAT` behavior depends on the dialect:
+- **BigQuery/Spanner**: Returns NULL if any argument is NULL
+- **PostgreSQL**: Treats NULL as empty string
+
+## substr
+
+Extracts a substring from a string.
+
+### With start and length
+
+**JSON Logic:**
+```json
+{"substr": [{"var": "email"}, 0, 10]}
+```
+
+**SQL output (BigQuery/Spanner):**
+```sql
+WHERE SUBSTR(email, 1, 10)
+```
+
+**SQL output (PostgreSQL):**
+```sql
+WHERE SUBSTR(email, 1, 10)
+```
+
+<ParamField path="substr" type="[string, start, length?]" required>
+  Array with source string, start position (0-based in JSON Logic, 1-based in SQL), and optional length
+</ParamField>
+
+<Note>
+JSON Logic uses 0-based indexing, but SQL uses 1-based indexing. The transpiler automatically converts `start` by adding 1.
+</Note>
+
+### Without length (to end of string)
+
+**JSON Logic:**
+```json
+{"substr": [{"var": "email"}, 4]}
+```
+
+**SQL output:**
+```sql
+WHERE SUBSTR(email, 5)
+```
+
+Extracts from position 4 (JSON Logic 0-based) to the end of the string.
+
+### Extract domain from email
+
+**JSON Logic:**
+```json
+{"substr": [{"var": "email"}, 0, 20]}
+```
+```sql
+WHERE SUBSTR(email, 1, 20)
+```
+
+Gets the first 20 characters of an email address.
+
+### Extract file extension
+
+For a more complex example, you might combine with other operators:
+
+**JSON Logic:**
+```json
+{"substr": [{"var": "filename"}, -4]}
+```
+
+<Note>
+Negative indices (counting from the end) may not be directly supported in all SQL dialects. Check dialect-specific documentation.
+</Note>
+
+### Position examples
+
+```json
+// String: "hello world" (0-indexed in JSON Logic)
+
+{"substr": ["hello world", 0, 5]}
+// Result: "hello" (positions 0-4)
+// SQL: SUBSTR('hello world', 1, 5)
+
+{"substr": ["hello world", 6, 5]}
+// Result: "world" (positions 6-10)
+// SQL: SUBSTR('hello world', 7, 5)
+
+{"substr": ["hello world", 6]}
+// Result: "world" (position 6 to end)
+// SQL: SUBSTR('hello world', 7)
+```
+
+## in (string containment)
+
+Checks if a substring exists within a string. This is the same `in` operator used for arrays, but with string arguments.
+
+**JSON Logic:**
+```json
+{"in": ["hello", "hello world"]}
+```
+
+**SQL output (BigQuery/Spanner):**
+```sql
+WHERE STRPOS('hello world', 'hello') > 0
+```
+
+**SQL output (PostgreSQL):**
+```sql
+WHERE POSITION('hello' IN 'hello world') > 0
+```
+
+**SQL output (DuckDB):**
+```sql
+WHERE INSTR('hello world', 'hello') > 0
+```
+
+<ParamField path="in" type="[substring, string]" required>
+  Array with substring to find and string to search in
+</ParamField>
+
+### Check email domain
+
+**JSON Logic:**
+```json
+{"in": ["@gmail.com", {"var": "email"}]}
+```
+
+**SQL output (BigQuery):**
+```sql
+WHERE STRPOS(email, '@gmail.com') > 0
+```
+
+Checks if email address contains "@gmail.com".
+
+### Case-sensitive search
+
+**JSON Logic:**
+```json
+{"in": ["Error", {"var": "log_message"}]}
+```
+
+**SQL output:**
+```sql
+WHERE STRPOS(log_message, 'Error') > 0
+```
+
+Searches are case-sensitive by default. For case-insensitive search, use a custom operator or transform both strings to lowercase:
+
+```json
+{
+  "in": [
+    "error",
+    {"lower": [{"var": "log_message"}]}
+  ]
+}
+```
+
+<Note>
+`lower` is not a built-in operator. You would need to register it as a custom operator or handle case-insensitivity at the database level.
+</Note>
+
+### Multiple substring checks
+
+**JSON Logic:**
+```json
+{
+  "or": [
+    {"in": ["urgent", {"var": "subject"}]},
+    {"in": ["important", {"var": "subject"}]},
+    {"in": ["critical", {"var": "subject"}]}
+  ]
+}
+```
+
+**SQL output:**
+```sql
+WHERE (
+  STRPOS(subject, 'urgent') > 0 OR 
+  STRPOS(subject, 'important') > 0 OR 
+  STRPOS(subject, 'critical') > 0
+)
+```
+
+Finds messages with any of the keywords in the subject.
+
+### Negating containment
+
+**JSON Logic:**
+```json
+{
+  "!": [{"in": ["spam", {"var": "message"}]}]
+}
+```
+
+**SQL output:**
+```sql
+WHERE NOT (STRPOS(message, 'spam') > 0)
+```
+
+Filters out messages containing "spam".
+
+## Practical examples
+
+### Build full name
+
+**JSON Logic:**
+```json
+{"cat": [{"var": "first_name"}, " ", {"var": "last_name"}]}
+```
+```sql
+WHERE CONCAT(first_name, ' ', last_name)
+```
+
+### Format address
+
+**JSON Logic:**
+```json
+{
+  "cat": [
+    {"var": "street"},
+    ", ",
+    {"var": "city"},
+    ", ",
+    {"var": "state"},
+    " ",
+    {"var": "zip"}
+  ]
+}
+```
+```sql
+WHERE CONCAT(street, ', ', city, ', ', state, ' ', zip)
+```
+
+### Extract initials
+
+**JSON Logic:**
+```json
+{
+  "cat": [
+    {"substr": [{"var": "first_name"}, 0, 1]},
+    {"substr": [{"var": "last_name"}, 0, 1]}
+  ]
+}
+```
+```sql
+WHERE CONCAT(SUBSTR(first_name, 1, 1), SUBSTR(last_name, 1, 1))
+```
+
+### Filter by email domain
+
+**JSON Logic:**
+```json
+{
+  "or": [
+    {"in": ["@company.com", {"var": "email"}]},
+    {"in": ["@subsidiary.com", {"var": "email"}]}
+  ]
+}
+```
+```sql
+WHERE (STRPOS(email, '@company.com') > 0 OR STRPOS(email, '@subsidiary.com') > 0)
+```
+
+### Search log messages
+
+**JSON Logic:**
+```json
+{
+  "and": [
+    {"in": ["ERROR", {"var": "log_level"}]},
+    {"in": ["database", {"var": "message"}]}
+  ]
+}
+```
+```sql
+WHERE (STRPOS(log_level, 'ERROR') > 0 AND STRPOS(message, 'database') > 0)
+```
+
+Finds error logs related to database issues.
+
+## Dialect differences
+
+### CONCAT function
+
+All supported dialects use `CONCAT()`:
+- **BigQuery, Spanner, PostgreSQL, DuckDB**: `CONCAT(str1, str2, ...)`
+
+### SUBSTR function
+
+All supported dialects use `SUBSTR()`:
+- **BigQuery, Spanner, PostgreSQL, DuckDB**: `SUBSTR(string, start, length?)`
+
+### String position/search
+
+Different dialects use different functions:
+- **BigQuery/Spanner**: `STRPOS(string, substring) > 0`
+- **PostgreSQL**: `POSITION(substring IN string) > 0`
+- **DuckDB**: `INSTR(string, substring) > 0` or `STRPOS(string, substring) > 0`
+- **ClickHouse**: `position(string, substring) > 0`
+
+## Error codes
+
+- `E300` (ErrInsufficientArgs) - Not enough arguments provided
+- `E301` (ErrTooManyArgs) - Too many arguments provided
+- `E302` (ErrInvalidArgument) - Argument is not a string or has wrong type
+- `E303` (ErrInvalidArgType) - Start/length arguments are not numbers
+
+## See also
+
+- [Array operators](/api/operators/array) - Array membership with `in` operator
+- [Logical operators](/api/operators/logical) - Combine string conditions with and/or
+- [Custom operators](/api/transpiler#registeroperator) - Add custom string operations like `lower`, `upper`, `trim`

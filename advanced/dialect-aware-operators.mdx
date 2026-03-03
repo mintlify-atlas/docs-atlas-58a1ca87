@@ -1,0 +1,305 @@
+---
+title: Dialect-aware operators
+description: Create custom operators that generate different SQL for each dialect
+---
+
+Dialect-aware operators allow you to create custom operators that generate different SQL based on the target dialect. This is essential when SQL dialects have different function names or syntax for the same operation.
+
+## When to use dialect-aware operators
+
+Use dialect-aware operators when:
+
+- Different dialects use different function names for the same operation
+- SQL syntax varies significantly between dialects
+- You need to optimize for specific dialect features
+- Fallback implementations are needed for unsupported dialects
+
+<Tip>
+If your operator generates the same SQL across all dialects, use a regular `OperatorFunc` instead for simplicity.
+</Tip>
+
+## Using dialect-aware functions
+
+The simplest way to create a dialect-aware operator is using `RegisterDialectAwareOperatorFunc`:
+
+```go operator.go:23-38
+transpiler, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery)
+
+err := transpiler.RegisterDialectAwareOperatorFunc("safeDivide",
+    func(op string, args []interface{}, dialect jsonlogic2sql.Dialect) (string, error) {
+        if len(args) != 2 {
+            return "", fmt.Errorf("safeDivide requires exactly 2 arguments")
+        }
+        numerator := args[0]
+        denominator := args[1]
+
+        switch dialect {
+        case jsonlogic2sql.DialectBigQuery:
+            return fmt.Sprintf("SAFE_DIVIDE(%s, %s)", numerator, denominator), nil
+        case jsonlogic2sql.DialectClickHouse:
+            return fmt.Sprintf("if(%s = 0, NULL, %s / %s)", denominator, numerator, denominator), nil
+        default:
+            return fmt.Sprintf("CASE WHEN %s = 0 THEN NULL ELSE %s / %s END",
+                denominator, numerator, denominator), nil
+        }
+    })
+```
+
+**Usage:**
+
+```json
+{"safeDivide": [{"var": "total"}, {"var": "count"}]}
+```
+
+**Output by dialect:**
+
+<CodeGroup>
+
+```sql BigQuery
+WHERE SAFE_DIVIDE(total, count)
+```
+
+```sql ClickHouse
+WHERE if(count = 0, NULL, total / count)
+```
+
+```sql PostgreSQL/Spanner/DuckDB
+WHERE CASE WHEN count = 0 THEN NULL ELSE total / count END
+```
+
+</CodeGroup>
+
+## Using dialect-aware handlers
+
+For more complex operators that need state or reusable logic, implement the `DialectAwareOperatorHandler` interface:
+
+```go operator.go:59-79
+type SafeDivideOperator struct{}
+
+func (s *SafeDivideOperator) ToSQLWithDialect(
+    op string, 
+    args []interface{}, 
+    dialect jsonlogic2sql.Dialect,
+) (string, error) {
+    if len(args) != 2 {
+        return "", fmt.Errorf("safeDivide requires exactly 2 arguments")
+    }
+    numerator := args[0]
+    denominator := args[1]
+
+    switch dialect {
+    case jsonlogic2sql.DialectBigQuery:
+        return fmt.Sprintf("SAFE_DIVIDE(%s, %s)", numerator, denominator), nil
+    case jsonlogic2sql.DialectSpanner:
+        return fmt.Sprintf("CASE WHEN %s = 0 THEN NULL ELSE %s / %s END",
+            denominator, numerator, denominator), nil
+    default:
+        return "", fmt.Errorf("unsupported dialect: %v", dialect)
+    }
+}
+
+transpiler, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery)
+err := transpiler.RegisterDialectAwareOperator("safeDivide", &SafeDivideOperator{})
+```
+
+<Info>
+The `ToSQLWithDialect` method receives the dialect as a parameter, allowing you to generate SQL specific to that dialect.
+</Info>
+
+## Real-world example: String contains
+
+Different dialects have different functions for checking if a string contains a substring:
+
+```go operator_test.go:710-747
+stringContainsOp := func(op string, args []interface{}, dialect jsonlogic2sql.Dialect) (string, error) {
+    if len(args) != 2 {
+        return "", fmt.Errorf("string_contains requires 2 arguments")
+    }
+    
+    switch dialect {
+    case jsonlogic2sql.DialectBigQuery:
+        return fmt.Sprintf("STRPOS(%s, %s) > 0", args[0], args[1]), nil
+    case jsonlogic2sql.DialectSpanner:
+        return fmt.Sprintf("STRPOS(%s, %s) > 0", args[0], args[1]), nil
+    default:
+        return "", fmt.Errorf("unsupported dialect: %s", dialect)
+    }
+}
+
+// Test with BigQuery
+bqTranspiler, _ := NewTranspiler(DialectBigQuery)
+bqTranspiler.RegisterDialectAwareOperatorFunc("string_contains", stringContainsOp)
+sql, _ := bqTranspiler.Transpile(`{"string_contains": [{"var": "name"}, "test"]}`)
+// Output: WHERE STRPOS(name, 'test') > 0
+
+// Test with Spanner
+spannerTranspiler, _ := NewTranspiler(DialectSpanner)
+spannerTranspiler.RegisterDialectAwareOperatorFunc("string_contains", stringContainsOp)
+sql, _ = spannerTranspiler.Transpile(`{"string_contains": [{"var": "name"}, "test"]}`)
+// Output: WHERE STRPOS(name, 'test') > 0
+```
+
+## Example: Timestamp functions
+
+```go
+transpiler.RegisterDialectAwareOperatorFunc("now", 
+    func(op string, args []interface{}, dialect jsonlogic2sql.Dialect) (string, error) {
+        switch dialect {
+        case jsonlogic2sql.DialectBigQuery:
+            return "CURRENT_TIMESTAMP()", nil
+        case jsonlogic2sql.DialectSpanner:
+            return "CURRENT_TIMESTAMP()", nil
+        case jsonlogic2sql.DialectPostgreSQL:
+            return "NOW()", nil
+        case jsonlogic2sql.DialectDuckDB:
+            return "NOW()", nil
+        case jsonlogic2sql.DialectClickHouse:
+            return "now()", nil
+        default:
+            return "", fmt.Errorf("unsupported dialect: %s", dialect)
+        }
+    })
+```
+
+**Usage:**
+
+```json
+{"==": [{"now": []}, "2024-01-01"]}
+```
+
+**Output:**
+
+- BigQuery/Spanner: `WHERE CURRENT_TIMESTAMP() = '2024-01-01'`
+- PostgreSQL/DuckDB: `WHERE NOW() = '2024-01-01'`
+- ClickHouse: `WHERE now() = '2024-01-01'`
+
+## Example: Array length
+
+```go operator_test.go:686-708
+transpiler.RegisterDialectAwareOperatorFunc("array_length", 
+    func(op string, args []interface{}, dialect jsonlogic2sql.Dialect) (string, error) {
+        switch dialect {
+        case jsonlogic2sql.DialectBigQuery:
+            return fmt.Sprintf("ARRAY_LENGTH(%s)", args[0]), nil
+        case jsonlogic2sql.DialectSpanner:
+            return fmt.Sprintf("ARRAY_LENGTH(%s)", args[0]), nil
+        default:
+            return "", fmt.Errorf("unsupported dialect: %s", dialect)
+        }
+    })
+
+sql, _ := transpiler.Transpile(`{">": [{"array_length": [{"var": "items"}]}, 0]}`)
+// BigQuery/Spanner: WHERE ARRAY_LENGTH(items) > 0
+```
+
+## How it works internally
+
+When you register a dialect-aware operator:
+
+1. The function is wrapped in a `dialectAwareFuncHandler` (operator.go:90-103)
+2. When transpiling, the current dialect is passed to your function
+3. Your function generates dialect-specific SQL
+4. The transpiler includes it in the final query
+
+```go operator.go:183-193
+func (t *Transpiler) RegisterDialectAwareOperatorFunc(name string, fn DialectAwareOperatorFunc) error {
+    if err := validateOperatorName(name); err != nil {
+        return err
+    }
+    // Wrap the function with the dialect so ToSQL works correctly
+    dialect := t.config.Dialect
+    t.customOperators.RegisterFunc(name, func(op string, args []interface{}) (string, error) {
+        return fn(op, args, dialect)
+    })
+    return nil
+}
+```
+
+## Supported dialects
+
+You can target any of these dialects in your switch statements:
+
+- `DialectBigQuery` - Google BigQuery
+- `DialectSpanner` - Google Cloud Spanner
+- `DialectPostgreSQL` - PostgreSQL
+- `DialectDuckDB` - DuckDB
+- `DialectClickHouse` - ClickHouse
+
+<Warning>
+Always return an error for unsupported dialects rather than silently generating incorrect SQL.
+</Warning>
+
+## Testing dialect-aware operators
+
+Test your operator across all dialects to ensure correctness:
+
+```go operator_test.go:1019-1106
+dialects := []struct {
+    dialect Dialect
+    name    string
+}{
+    {DialectBigQuery, "BigQuery"},
+    {DialectSpanner, "Spanner"},
+    {DialectPostgreSQL, "PostgreSQL"},
+    {DialectDuckDB, "DuckDB"},
+    {DialectClickHouse, "ClickHouse"},
+}
+
+for _, d := range dialects {
+    t.Run(d.name, func(t *testing.T) {
+        tr := setupTranspiler(d.dialect)
+        
+        sql, err := tr.Transpile(`{"custom": [{"var": "field"}]}`)
+        if err != nil {
+            t.Errorf("[%s] unexpected error: %v", d.name, err)
+        }
+        // Verify dialect-specific output
+    })
+}
+```
+
+## Best practices
+
+<AccordionGroup>
+
+<Accordion title="Always validate arguments first">
+Check argument count and types before generating SQL:
+
+```go
+if len(args) != 2 {
+    return "", fmt.Errorf("operator requires exactly 2 arguments, got %d", len(args))
+}
+```
+</Accordion>
+
+<Accordion title="Return errors for unsupported dialects">
+Don't silently fail or generate incorrect SQL:
+
+```go
+default:
+    return "", fmt.Errorf("unsupported dialect: %s", dialect)
+```
+</Accordion>
+
+<Accordion title="Use fallback implementations">
+Provide a generic implementation in the default case when possible:
+
+```go
+default:
+    // Generic CASE expression works on most SQL dialects
+    return fmt.Sprintf("CASE WHEN %s = 0 THEN NULL ELSE %s / %s END",
+        denominator, numerator, denominator), nil
+```
+</Accordion>
+
+<Accordion title="Document dialect differences">
+Clearly document which dialects are supported and any behavior differences.
+</Accordion>
+
+</AccordionGroup>
+
+## See also
+
+- [Operator registry](/advanced/operator-registry) - Managing custom operators
+- [SQL dialects](/core-concepts/dialects) - Dialect-specific SQL generation
+- [Custom operators](/customization/custom-operators) - Basic custom operators

@@ -1,0 +1,529 @@
+---
+title: Logical operators
+description: Conditional expressions and boolean logic operators (if, ==, !=, and, or, !, !!)
+---
+
+Logical operators provide conditional expressions, equality comparisons, and boolean logic for building complex WHERE clauses.
+
+## if
+
+Conditional expression that returns different values based on a condition.
+
+### Basic if-then-else
+
+**JSON Logic:**
+```json
+{
+  "if": [
+    {">": [{"var": "age"}, 18]},
+    "adult",
+    "minor"
+  ]
+}
+```
+
+**SQL output:**
+```sql
+WHERE CASE WHEN age > 18 THEN 'adult' ELSE 'minor' END
+```
+
+<ParamField path="if" type="[condition, thenValue, elseValue]" required>
+  Array with condition, then value, and optional else value
+</ParamField>
+
+### Without else clause
+
+**JSON Logic:**
+```json
+{
+  "if": [
+    {"==": [{"var": "status"}, "premium"]},
+    "Premium user"
+  ]
+}
+```
+
+**SQL output:**
+```sql
+WHERE CASE WHEN status = 'premium' THEN 'Premium user' END
+```
+
+### Multiple conditions (if-elseif-else)
+
+**JSON Logic:**
+```json
+{
+  "if": [
+    {"<": [{"var": "score"}, 60]}, "F",
+    {"<": [{"var": "score"}, 70]}, "D",
+    {"<": [{"var": "score"}, 80]}, "C",
+    {"<": [{"var": "score"}, 90]}, "B",
+    "A"
+  ]
+}
+```
+
+**SQL output:**
+```sql
+WHERE CASE 
+  WHEN score < 60 THEN 'F'
+  WHEN score < 70 THEN 'D'
+  WHEN score < 80 THEN 'C'
+  WHEN score < 90 THEN 'B'
+  ELSE 'A'
+END
+```
+
+Conditions are evaluated in order. The first true condition returns its corresponding value.
+
+### Nested conditionals
+
+**JSON Logic:**
+```json
+{
+  "if": [
+    {"==": [{"var": "type"}, "individual"]},
+    {"if": [{">": [{"var": "age"}, 65]}, "senior", "adult"]},
+    "organization"
+  ]
+}
+```
+
+**SQL output:**
+```sql
+WHERE CASE 
+  WHEN type = 'individual' THEN CASE WHEN age > 65 THEN 'senior' ELSE 'adult' END
+  ELSE 'organization'
+END
+```
+
+## Equality
+
+### ==
+
+Equality comparison. In SQL, handles NULL correctly with `IS NULL` / `IS NOT NULL`.
+
+**JSON Logic:**
+```json
+{"==": [{"var": "status"}, "active"]}
+```
+
+**SQL output:**
+```sql
+WHERE status = 'active'
+```
+
+<ParamField path="==" type="[value1, value2]" required>
+  Array with two values to compare for equality
+</ParamField>
+
+### Equality with NULL
+
+**JSON Logic:**
+```json
+{"==": [{"var": "deleted_at"}, null]}
+```
+
+**SQL output:**
+```sql
+WHERE deleted_at IS NULL
+```
+
+Automatically uses `IS NULL` instead of `= NULL` for proper SQL NULL handling.
+
+### ===
+
+Strict equality comparison. Behaves the same as `==` in SQL context.
+
+**JSON Logic:**
+```json
+{"===": [{"var": "count"}, 5]}
+```
+
+**SQL output:**
+```sql
+WHERE count = 5
+```
+
+### Numeric comparison
+
+**JSON Logic:**
+```json
+{"==": [{"var": "quantity"}, 0]}
+```
+
+**SQL output:**
+```sql
+WHERE quantity = 0
+```
+
+### Boolean comparison
+
+**JSON Logic:**
+```json
+{"==": [{"var": "is_active"}, true]}
+```
+
+**SQL output:**
+```sql
+WHERE is_active = TRUE
+```
+
+### Enum validation with schema
+
+When using a [Schema](/api/schema) with enum fields, the `==` operator validates values:
+
+```go
+schema := jsonlogic2sql.NewSchema([]jsonlogic2sql.FieldSchema{
+    {
+        Name: "status",
+        Type: jsonlogic2sql.FieldTypeEnum,
+        AllowedValues: []string{"active", "pending", "completed"},
+    },
+})
+
+transpiler.SetSchema(schema)
+
+// Valid
+sql, _ := transpiler.Transpile(`{"==": [{"var": "status"}, "active"]}`)
+
+// Error: invalid enum value
+_, err := transpiler.Transpile(`{"==": [{"var": "status"}, "invalid"]}`)
+// [E203] invalid enum value 'invalid' for field 'status'
+```
+
+## Inequality
+
+### !=
+
+Inequality comparison. Handles NULL correctly with `IS NOT NULL`.
+
+**JSON Logic:**
+```json
+{"!=": [{"var": "status"}, "deleted"]}
+```
+
+**SQL output:**
+```sql
+WHERE status != 'deleted'
+```
+
+<ParamField path="!=" type="[value1, value2]" required>
+  Array with two values to compare for inequality
+</ParamField>
+
+### Inequality with NULL
+
+**JSON Logic:**
+```json
+{"!=": [{"var": "email"}, null]}
+```
+
+**SQL output:**
+```sql
+WHERE email IS NOT NULL
+```
+
+Automatically uses `IS NOT NULL` for NULL comparisons.
+
+### !==
+
+Strict inequality comparison. Behaves the same as `!=` in SQL context.
+
+**JSON Logic:**
+```json
+{"!==": [{"var": "count"}, 0]}
+```
+
+**SQL output:**
+```sql
+WHERE count != 0
+```
+
+## and
+
+Logical AND - all conditions must be true.
+
+**JSON Logic:**
+```json
+{
+  "and": [
+    {">": [{"var": "amount"}, 1000]},
+    {"==": [{"var": "status"}, "pending"]}
+  ]
+}
+```
+
+**SQL output:**
+```sql
+WHERE (amount > 1000 AND status = 'pending')
+```
+
+<ParamField path="and" type="[condition1, condition2, ...]" required>
+  Array of conditions - all must be true
+</ParamField>
+
+### Multiple conditions
+
+**JSON Logic:**
+```json
+{
+  "and": [
+    {"!=": [{"var": "deleted_at"}, null]},
+    {"==": [{"var": "active"}, true]},
+    {">": [{"var": "balance"}, 0]}
+  ]
+}
+```
+
+**SQL output:**
+```sql
+WHERE (deleted_at IS NOT NULL AND active = TRUE AND balance > 0)
+```
+
+### Nested AND
+
+**JSON Logic:**
+```json
+{
+  "and": [
+    {"and": [{">": [{"var": "age"}, 18]}, {"<": [{"var": "age"}, 65]}]},
+    {"==": [{"var": "country"}, "US"]}
+  ]
+}
+```
+
+**SQL output:**
+```sql
+WHERE ((age > 18 AND age < 65) AND country = 'US')
+```
+
+## or
+
+Logical OR - at least one condition must be true.
+
+**JSON Logic:**
+```json
+{
+  "or": [
+    {"==": [{"var": "status"}, "premium"]},
+    {">": [{"var": "total_spent"}, 10000]}
+  ]
+}
+```
+
+**SQL output:**
+```sql
+WHERE (status = 'premium' OR total_spent > 10000)
+```
+
+<ParamField path="or" type="[condition1, condition2, ...]" required>
+  Array of conditions - at least one must be true
+</ParamField>
+
+### Multiple conditions
+
+**JSON Logic:**
+```json
+{
+  "or": [
+    {"==": [{"var": "role"}, "admin"]},
+    {"==": [{"var": "role"}, "moderator"]},
+    {"==": [{"var": "role"}, "owner"]}
+  ]
+}
+```
+
+**SQL output:**
+```sql
+WHERE (role = 'admin' OR role = 'moderator' OR role = 'owner')
+```
+
+Note: For checking membership in a list, use the [`in` operator](/api/operators/array#in) instead.
+
+### Combining AND and OR
+
+**JSON Logic:**
+```json
+{
+  "and": [
+    {"or": [{"==": [{"var": "country"}, "US"]}, {"==": [{"var": "country"}, "CA"]}]},
+    {">": [{"var": "amount"}, 100]}
+  ]
+}
+```
+
+**SQL output:**
+```sql
+WHERE ((country = 'US' OR country = 'CA') AND amount > 100)
+```
+
+## !
+
+Logical NOT - negates a condition.
+
+**JSON Logic:**
+```json
+{"!": [{"var": "is_deleted"}]}
+```
+
+**SQL output:**
+```sql
+WHERE NOT (is_deleted)
+```
+
+<ParamField path="!" type="[condition]" required>
+  Single condition to negate
+</ParamField>
+
+### Negating comparisons
+
+**JSON Logic:**
+```json
+{"!": [{"==": [{"var": "status"}, "inactive"]}]}
+```
+
+**SQL output:**
+```sql
+WHERE NOT (status = 'inactive')
+```
+
+Note: For inequality, prefer using `!=` directly:
+```json
+{"!=": [{"var": "status"}, "inactive"]}
+// → WHERE status != 'inactive'
+```
+
+### Negating complex conditions
+
+**JSON Logic:**
+```json
+{
+  "!": [
+    {"and": [
+      {">": [{"var": "age"}, 18]},
+      {"<": [{"var": "age"}, 65]}
+    ]}
+  ]
+}
+```
+
+**SQL output:**
+```sql
+WHERE NOT (age > 18 AND age < 65)
+```
+
+## !!
+
+Double negation - converts value to boolean (truthy/falsy check).
+
+### Without schema (generic truthiness)
+
+**JSON Logic:**
+```json
+{"!!": [{"var": "email"}]}
+```
+
+**SQL output:**
+```sql
+WHERE (email IS NOT NULL AND email != FALSE AND email != 0 AND email != '')
+```
+
+<ParamField path="!!" type="[value]" required>
+  Single value to convert to boolean
+</ParamField>
+
+Without a schema, generates a generic truthiness check covering NULL, FALSE, 0, and empty string.
+
+### With schema (type-aware truthiness)
+
+When a [Schema](/api/schema) is provided, the `!!` operator generates type-appropriate SQL:
+
+**String field:**
+```go
+schema := jsonlogic2sql.NewSchema([]jsonlogic2sql.FieldSchema{
+    {Name: "email", Type: jsonlogic2sql.FieldTypeString},
+})
+```
+
+```json
+{"!!": [{"var": "email"}]}
+```
+```sql
+WHERE (email IS NOT NULL AND email != '')
+```
+
+**Numeric field:**
+```go
+schema := jsonlogic2sql.NewSchema([]jsonlogic2sql.FieldSchema{
+    {Name: "count", Type: jsonlogic2sql.FieldTypeInteger},
+})
+```
+
+```json
+{"!!": [{"var": "count"}]}
+```
+```sql
+WHERE (count IS NOT NULL AND count != 0)
+```
+
+**Boolean field:**
+```go
+schema := jsonlogic2sql.NewSchema([]jsonlogic2sql.FieldSchema{
+    {Name: "active", Type: jsonlogic2sql.FieldTypeBoolean},
+})
+```
+
+```json
+{"!!": [{"var": "active"}]}
+```
+```sql
+WHERE (active IS NOT NULL AND active = TRUE)
+```
+
+**Array field:**
+```go
+schema := jsonlogic2sql.NewSchema([]jsonlogic2sql.FieldSchema{
+    {Name: "tags", Type: jsonlogic2sql.FieldTypeArray},
+})
+```
+
+```json
+{"!!": [{"var": "tags"}]}
+```
+```sql
+WHERE (tags IS NOT NULL AND ARRAY_LENGTH(tags) > 0)
+```
+
+### Practical examples
+
+**Check if email is provided:**
+```json
+{"if": [{"!!": [{"var": "email"}]}, "Has email", "No email"]}
+```
+
+**Filter active users with valid email:**
+```json
+{
+  "and": [
+    {"==": [{"var": "active"}, true]},
+    {"!!": [{"var": "email"}]}
+  ]
+}
+```
+
+## Error codes
+
+All logical operators can return the following error codes:
+
+- `E300` (ErrInsufficientArgs) - Not enough arguments provided
+- `E301` (ErrTooManyArgs) - Too many arguments provided
+- `E302` (ErrInvalidArgument) - Argument has invalid type or format
+- `E203` (ErrInvalidEnumValue) - Invalid enum value in equality comparison (with schema)
+
+## See also
+
+- [Numeric operators](/api/operators/numeric) - Comparison operators
+- [Data access operators](/api/operators/data-access) - Variable access and missing checks
+- [Array operators](/api/operators/array) - Array membership and operations
+- [Schema validation](/api/schema) - Type-aware validation and SQL generation

@@ -1,0 +1,460 @@
+---
+title: Numeric operators
+description: Comparison operators (>, >=, <, <=) and arithmetic operations (+, -, *, /, %, max, min)
+---
+
+Numeric operators provide comparison and arithmetic operations for building SQL expressions with numbers.
+
+## Comparison operators
+
+### Greater than (`>`)
+
+Greater than comparison.
+
+**JSON Logic:**
+```json
+{">": [{"var": "amount"}, 1000]}
+```
+
+**SQL output:**
+```sql
+WHERE amount > 1000
+```
+
+<ParamField path=">" type="[value1, value2]" required>
+  Array with two values to compare
+</ParamField>
+
+### Greater than or equal (`>=`)
+
+Greater than or equal to comparison.
+
+**JSON Logic:**
+```json
+{">=": [{"var": "score"}, 80]}
+```
+
+**SQL output:**
+```sql
+WHERE score >= 80
+```
+
+<ParamField path=">=" type="[value1, value2]" required>
+  Array with two values to compare
+</ParamField>
+
+### Less than (`<`)
+
+Less than comparison.
+
+**JSON Logic:**
+```json
+{"<": [{"var": "age"}, 65]}
+```
+
+**SQL output:**
+```sql
+WHERE age < 65
+```
+
+<ParamField path="<" type="[value1, value2]" required>
+  Array with two values to compare
+</ParamField>
+
+### Less than or equal (`<=`)
+
+Less than or equal to comparison.
+
+**JSON Logic:**
+```json
+{"<=": [{"var": "quantity"}, 10]}
+```
+
+**SQL output:**
+```sql
+WHERE quantity <= 10
+```
+
+<ParamField path="<=" type="[value1, value2]" required>
+  Array with two values to compare
+</ParamField>
+
+### Range comparisons
+
+Combine multiple comparisons for ranges:
+
+**JSON Logic:**
+```json
+{
+  "and": [
+    {">": [{"var": "age"}, 18]},
+    {"<": [{"var": "age"}, 65]}
+  ]
+}
+```
+
+**SQL output:**
+```sql
+WHERE (age > 18 AND age < 65)
+```
+
+Finds values between 18 and 65 (exclusive).
+
+**Inclusive range:**
+```json
+{
+  "and": [
+    {">=": [{"var": "price"}, 100]},
+    {"<=": [{"var": "price"}, 500]}
+  ]
+}
+```
+```sql
+WHERE (price >= 100 AND price <= 500)
+```
+
+## Arithmetic operators
+
+### +
+
+Addition operator. Can add multiple values or apply unary plus.
+
+**Binary addition:**
+```json
+{"+": [{"var": "price"}, {"var": "tax"}]}
+```
+```sql
+WHERE (price + tax)
+```
+
+**Multiple values:**
+```json
+{"+": [{"var": "base"}, {"var": "tax"}, {"var": "shipping"}]}
+```
+```sql
+WHERE (base + tax + shipping)
+```
+
+**Unary plus (type conversion):**
+```json
+{"+": ["-5"]}
+```
+```sql
+WHERE CAST(-5 AS NUMERIC)
+```
+
+<ParamField path="+" type="[value1, value2, ...]">
+  Array of values to add (or single value for unary plus)
+</ParamField>
+
+### -
+
+Subtraction operator or unary negation.
+
+**Binary subtraction:**
+```json
+{"-": [{"var": "total"}, {"var": "discount"}]}
+```
+```sql
+WHERE (total - discount)
+```
+
+**Unary negation:**
+```json
+{"-": [{"var": "value"}]}
+```
+```sql
+WHERE -value
+```
+
+**Chained subtraction:**
+```json
+{"-": [{"var": "total"}, {"var": "discount"}, {"var": "coupon"}]}
+```
+```sql
+WHERE (total - discount - coupon)
+```
+
+<ParamField path="-" type="[value1, value2?, ...]">
+  Array of values to subtract, or single value for negation
+</ParamField>
+
+### *
+
+Multiplication operator.
+
+**JSON Logic:**
+```json
+{"*": [{"var": "price"}, 1.2]}
+```
+
+**SQL output:**
+```sql
+WHERE (price * 1.2)
+```
+
+Multiplies price by 1.2 (e.g., add 20% markup).
+
+**Multiple factors:**
+```json
+{"*": [{"var": "quantity"}, {"var": "price"}, {"var": "tax_rate"}]}
+```
+```sql
+WHERE (quantity * price * tax_rate)
+```
+
+<ParamField path="*" type="[value1, value2, ...]" required>
+  Array of values to multiply
+</ParamField>
+
+### /
+
+Division operator.
+
+**JSON Logic:**
+```json
+{"/": [{"var": "total"}, 2]}
+```
+
+**SQL output:**
+```sql
+WHERE (total / 2)
+```
+
+**Average calculation:**
+```json
+{"/": [{"var": "sum"}, {"var": "count"}]}
+```
+```sql
+WHERE (sum / count)
+```
+
+<ParamField path="/" type="[dividend, divisor]" required>
+  Array with dividend and divisor
+</ParamField>
+
+<Note>
+Division by zero behavior depends on the SQL dialect. Some databases return NULL, others throw errors.
+</Note>
+
+### %
+
+Modulo operator (remainder after division).
+
+**JSON Logic:**
+```json
+{"%": [{"var": "count"}, 3]}
+```
+
+**SQL output:**
+```sql
+WHERE (count % 3)
+```
+
+**Check for even numbers:**
+```json
+{"==": [{"%": [{"var": "id"}, 2]}, 0]}
+```
+```sql
+WHERE (id % 2) = 0
+```
+
+**Check for odd numbers:**
+```json
+{"!=": [{"%": [{"var": "id"}, 2]}, 0]}
+```
+```sql
+WHERE (id % 2) != 0
+```
+
+<ParamField path="%" type="[dividend, divisor]" required>
+  Array with dividend and divisor
+</ParamField>
+
+## max and min
+
+### max
+
+Returns the maximum value from multiple arguments.
+
+**JSON Logic:**
+```json
+{"max": [{"var": "score1"}, {"var": "score2"}, {"var": "score3"}]}
+```
+
+**SQL output (BigQuery/Spanner):**
+```sql
+WHERE GREATEST(score1, score2, score3)
+```
+
+**SQL output (PostgreSQL):**
+```sql
+WHERE GREATEST(score1, score2, score3)
+```
+
+<ParamField path="max" type="[value1, value2, ...]" required>
+  Array of values - returns the largest
+</ParamField>
+
+**Two values:**
+```json
+{"max": [{"var": "budget"}, 1000]}
+```
+```sql
+WHERE GREATEST(budget, 1000)
+```
+
+Ensures value is at least 1000.
+
+### min
+
+Returns the minimum value from multiple arguments.
+
+**JSON Logic:**
+```json
+{"min": [{"var": "price1"}, {"var": "price2"}]}
+```
+
+**SQL output (BigQuery/Spanner):**
+```sql
+WHERE LEAST(price1, price2)
+```
+
+**SQL output (PostgreSQL):**
+```sql
+WHERE LEAST(price1, price2)
+```
+
+<ParamField path="min" type="[value1, value2, ...]" required>
+  Array of values - returns the smallest
+</ParamField>
+
+**Capping values:**
+```json
+{"min": [{"var": "discount"}, 50]}
+```
+```sql
+WHERE LEAST(discount, 50)
+```
+
+Caps discount at maximum of 50.
+
+## Practical examples
+
+### Price calculations
+
+**Apply tax and discount:**
+```json
+{
+  "-": [
+    {"*": [{"var": "price"}, 1.07]},
+    {"var": "discount"}
+  ]
+}
+```
+```sql
+WHERE ((price * 1.07) - discount)
+```
+
+### Commission tiers
+
+**Tiered commission rates:**
+```json
+{
+  "if": [
+    {">": [{"var": "sales"}, 10000]},
+    {"*": [{"var": "sales"}, 0.15]},
+    {">": [{"var": "sales"}, 5000]},
+    {"*": [{"var": "sales"}, 0.10]},
+    {"*": [{"var": "sales"}, 0.05]}
+  ]
+}
+```
+```sql
+WHERE CASE
+  WHEN sales > 10000 THEN (sales * 0.15)
+  WHEN sales > 5000 THEN (sales * 0.10)
+  ELSE (sales * 0.05)
+END
+```
+
+### Age validation
+
+**Adults only (18+):**
+```json
+{">=": [{"var": "age"}, 18]}
+```
+```sql
+WHERE age >= 18
+```
+
+**Senior discount (65+):**
+```json
+{
+  "if": [
+    {">=": [{"var": "age"}, 65]},
+    {"*": [{"var": "price"}, 0.8]},
+    {"var": "price"}
+  ]
+}
+```
+```sql
+WHERE CASE
+  WHEN age >= 65 THEN (price * 0.8)
+  ELSE price
+END
+```
+
+### Quantity limits
+
+**Minimum order quantity:**
+```json
+{"and": [
+  {">=": [{"var": "quantity"}, 10]},
+  {"==": [{"var": "product_type"}, "bulk"]}
+]}
+```
+```sql
+WHERE (quantity >= 10 AND product_type = 'bulk')
+```
+
+**Maximum per customer:**
+```json
+{"<=": [{"var": "quantity"}, 100]}
+```
+```sql
+WHERE quantity <= 100
+```
+
+## Operator precedence
+
+JSON Logic evaluates from the inside out. Use nesting to control order of operations:
+
+**Multiplication before addition (natural precedence):**
+```json
+{"+": [{"*": [{"var": "price"}, {"var": "qty"}]}, {"var": "shipping"}]}
+```
+```sql
+WHERE ((price * qty) + shipping)
+```
+
+**Addition before multiplication (forced with parentheses):**
+```json
+{"*": [{"+": [{"var": "price"}, {"var": "fee"}]}, {"var": "qty"}]}
+```
+```sql
+WHERE ((price + fee) * qty)
+```
+
+## Error codes
+
+- `E300` (ErrInsufficientArgs) - Not enough arguments provided
+- `E301` (ErrTooManyArgs) - Too many arguments for binary operators
+- `E302` (ErrInvalidArgument) - Argument is not a number or numeric expression
+- `E303` (ErrInvalidArgType) - Argument has wrong type (e.g., string in arithmetic)
+
+## See also
+
+- [Logical operators](/api/operators/logical) - Combine conditions with and/or
+- [Array operators](/api/operators/array) - Array-specific operations
+- [String operators](/api/operators/string) - String concatenation and manipulation

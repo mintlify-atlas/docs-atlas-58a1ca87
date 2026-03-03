@@ -1,0 +1,399 @@
+---
+title: Transpiler
+description: Transpiler type and instance methods for converting JSON Logic to SQL
+---
+
+The `Transpiler` type provides the main API for converting JSON Logic expressions to SQL WHERE clauses. It supports custom operators, schema validation, and multiple SQL dialects.
+
+## Type definition
+
+```go
+type Transpiler struct {
+    // Private fields - use methods to interact
+}
+```
+
+Create instances using [NewTranspiler()](/api/functions#newtranspiler) or [NewTranspilerWithConfig()](/api/functions#newtranspilerwithconfig).
+
+## Transpilation methods
+
+### Transpile
+
+```go
+func (t *Transpiler) Transpile(jsonLogic string) (string, error)
+```
+
+Converts a JSON Logic string to a SQL WHERE clause.
+
+<ParamField path="jsonLogic" type="string" required>
+  JSON Logic expression as a string
+</ParamField>
+
+<ResponseField name="return" type="(string, error)">
+  SQL WHERE clause (including `WHERE` keyword) and any error encountered
+</ResponseField>
+
+**Example:**
+
+```go
+transpiler, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery)
+sql, err := transpiler.Transpile(`{"==": [{"var": "status"}, "active"]}`)
+// Result: WHERE status = 'active'
+```
+
+### TranspileFromMap
+
+```go
+func (t *Transpiler) TranspileFromMap(logic map[string]interface{}) (string, error)
+```
+
+Converts a pre-parsed JSON Logic map to a SQL WHERE clause.
+
+<ParamField path="logic" type="map[string]interface{}" required>
+  Pre-parsed JSON Logic expression
+</ParamField>
+
+<ResponseField name="return" type="(string, error)">
+  SQL WHERE clause (including `WHERE` keyword) and any error encountered
+</ResponseField>
+
+**Example:**
+
+```go
+logic := map[string]interface{}{
+    "==": []interface{}{map[string]interface{}{"var": "status"}, "active"},
+}
+sql, err := transpiler.TranspileFromMap(logic)
+```
+
+### TranspileFromInterface
+
+```go
+func (t *Transpiler) TranspileFromInterface(logic interface{}) (string, error)
+```
+
+Converts any JSON Logic interface{} to a SQL WHERE clause.
+
+<ParamField path="logic" type="interface{}" required>
+  JSON Logic expression as any type (typically from `json.Unmarshal`)
+</ParamField>
+
+<ResponseField name="return" type="(string, error)">
+  SQL WHERE clause (including `WHERE` keyword) and any error encountered
+</ResponseField>
+
+### TranspileCondition
+
+```go
+func (t *Transpiler) TranspileCondition(jsonLogic string) (string, error)
+```
+
+Converts a JSON Logic string to a SQL condition **without** the WHERE keyword. Useful for embedding conditions in larger queries.
+
+<ParamField path="jsonLogic" type="string" required>
+  JSON Logic expression as a string
+</ParamField>
+
+<ResponseField name="return" type="(string, error)">
+  SQL condition (without `WHERE` keyword) and any error encountered
+</ResponseField>
+
+**Example:**
+
+```go
+condition, err := transpiler.TranspileCondition(`{">": [{"var": "amount"}, 1000]}`)
+// Result: amount > 1000
+// Use in: SELECT * FROM orders WHERE active = true AND " + condition
+```
+
+### TranspileConditionFromMap
+
+```go
+func (t *Transpiler) TranspileConditionFromMap(logic map[string]interface{}) (string, error)
+```
+
+Converts a pre-parsed JSON Logic map to a SQL condition without the WHERE keyword.
+
+<ParamField path="logic" type="map[string]interface{}" required>
+  Pre-parsed JSON Logic expression
+</ParamField>
+
+<ResponseField name="return" type="(string, error)">
+  SQL condition (without `WHERE` keyword) and any error encountered
+</ResponseField>
+
+### TranspileConditionFromInterface
+
+```go
+func (t *Transpiler) TranspileConditionFromInterface(logic interface{}) (string, error)
+```
+
+Converts any JSON Logic interface{} to a SQL condition without the WHERE keyword.
+
+<ParamField path="logic" type="interface{}" required>
+  JSON Logic expression as any type
+</ParamField>
+
+<ResponseField name="return" type="(string, error)">
+  SQL condition (without `WHERE` keyword) and any error encountered
+</ResponseField>
+
+## Configuration methods
+
+### GetDialect
+
+```go
+func (t *Transpiler) GetDialect() Dialect
+```
+
+Returns the configured SQL dialect for this transpiler instance.
+
+<ResponseField name="return" type="Dialect">
+  The SQL dialect (DialectBigQuery, DialectSpanner, etc.)
+</ResponseField>
+
+**Example:**
+
+```go
+dialect := transpiler.GetDialect()
+fmt.Println(dialect.String()) // "BigQuery"
+```
+
+### SetSchema
+
+```go
+func (t *Transpiler) SetSchema(schema *Schema)
+```
+
+Sets the schema for field validation and type checking. This is optional - if not set, no schema validation will be performed.
+
+<ParamField path="schema" type="*Schema" required>
+  Schema defining available fields and their types
+</ParamField>
+
+**Example:**
+
+```go
+schema := jsonlogic2sql.NewSchema([]jsonlogic2sql.FieldSchema{
+    {Name: "amount", Type: jsonlogic2sql.FieldTypeNumber},
+    {Name: "status", Type: jsonlogic2sql.FieldTypeString},
+})
+transpiler.SetSchema(schema)
+```
+
+## Custom operator methods
+
+### RegisterOperator
+
+```go
+func (t *Transpiler) RegisterOperator(name string, handler OperatorHandler) error
+```
+
+Registers a custom operator handler. The handler will be called when the operator is encountered during transpilation.
+
+<ParamField path="name" type="string" required>
+  Name of the custom operator (e.g., "length", "contains")
+</ParamField>
+
+<ParamField path="handler" type="OperatorHandler" required>
+  Handler implementing the `ToSQL(operator string, args []interface{}) (string, error)` method
+</ParamField>
+
+<ResponseField name="return" type="error">
+  Error if the operator name conflicts with a built-in operator, otherwise nil
+</ResponseField>
+
+**Example:**
+
+```go
+type LengthOperator struct{}
+
+func (l *LengthOperator) ToSQL(operator string, args []interface{}) (string, error) {
+    if len(args) != 1 {
+        return "", fmt.Errorf("length requires exactly 1 argument")
+    }
+    return fmt.Sprintf("LENGTH(%s)", args[0]), nil
+}
+
+transpiler.RegisterOperator("length", &LengthOperator{})
+sql, _ := transpiler.Transpile(`{"length": [{"var": "email"}]}`)
+// Result: WHERE LENGTH(email)
+```
+
+### RegisterOperatorFunc
+
+```go
+func (t *Transpiler) RegisterOperatorFunc(name string, fn OperatorFunc) error
+```
+
+Registers a custom operator function. This is a convenience method for simple operators that don't need state.
+
+<ParamField path="name" type="string" required>
+  Name of the custom operator
+</ParamField>
+
+<ParamField path="fn" type="OperatorFunc" required>
+  Function with signature `func(operator string, args []interface{}) (string, error)`
+</ParamField>
+
+<ResponseField name="return" type="error">
+  Error if the operator name conflicts with a built-in operator, otherwise nil
+</ResponseField>
+
+**Example:**
+
+```go
+transpiler.RegisterOperatorFunc("length", func(op string, args []interface{}) (string, error) {
+    if len(args) != 1 {
+        return "", fmt.Errorf("length requires exactly 1 argument")
+    }
+    return fmt.Sprintf("LENGTH(%s)", args[0]), nil
+})
+```
+
+### RegisterDialectAwareOperator
+
+```go
+func (t *Transpiler) RegisterDialectAwareOperator(name string, handler DialectAwareOperatorHandler) error
+```
+
+Registers a dialect-aware custom operator handler. Use this when your operator needs to generate different SQL based on the target dialect.
+
+<ParamField path="name" type="string" required>
+  Name of the custom operator
+</ParamField>
+
+<ParamField path="handler" type="DialectAwareOperatorHandler" required>
+  Handler implementing `ToSQLWithDialect(operator string, args []interface{}, dialect Dialect) (string, error)`
+</ParamField>
+
+<ResponseField name="return" type="error">
+  Error if the operator name conflicts with a built-in operator, otherwise nil
+</ResponseField>
+
+**Example:**
+
+```go
+type CurrentTimeOperator struct{}
+
+func (c *CurrentTimeOperator) ToSQLWithDialect(op string, args []interface{}, dialect jsonlogic2sql.Dialect) (string, error) {
+    switch dialect {
+    case jsonlogic2sql.DialectBigQuery, jsonlogic2sql.DialectSpanner:
+        return "CURRENT_TIMESTAMP()", nil
+    case jsonlogic2sql.DialectPostgreSQL:
+        return "CURRENT_TIMESTAMP", nil
+    default:
+        return "", fmt.Errorf("unsupported dialect: %s", dialect)
+    }
+}
+
+transpiler.RegisterDialectAwareOperator("now", &CurrentTimeOperator{})
+```
+
+### RegisterDialectAwareOperatorFunc
+
+```go
+func (t *Transpiler) RegisterDialectAwareOperatorFunc(name string, fn DialectAwareOperatorFunc) error
+```
+
+Registers a dialect-aware custom operator function. Use this for operators that need to generate different SQL based on the target dialect.
+
+<ParamField path="name" type="string" required>
+  Name of the custom operator
+</ParamField>
+
+<ParamField path="fn" type="DialectAwareOperatorFunc" required>
+  Function with signature `func(operator string, args []interface{}, dialect Dialect) (string, error)`
+</ParamField>
+
+<ResponseField name="return" type="error">
+  Error if the operator name conflicts with a built-in operator, otherwise nil
+</ResponseField>
+
+**Example:**
+
+```go
+transpiler.RegisterDialectAwareOperatorFunc("now", func(op string, args []interface{}, dialect jsonlogic2sql.Dialect) (string, error) {
+    switch dialect {
+    case jsonlogic2sql.DialectBigQuery:
+        return "CURRENT_TIMESTAMP()", nil
+    case jsonlogic2sql.DialectPostgreSQL:
+        return "CURRENT_TIMESTAMP", nil
+    default:
+        return "", fmt.Errorf("unsupported dialect: %s", dialect)
+    }
+})
+```
+
+### UnregisterOperator
+
+```go
+func (t *Transpiler) UnregisterOperator(name string) bool
+```
+
+Removes a custom operator from the transpiler.
+
+<ParamField path="name" type="string" required>
+  Name of the operator to remove
+</ParamField>
+
+<ResponseField name="return" type="bool">
+  `true` if the operator was found and removed, `false` otherwise
+</ResponseField>
+
+### HasCustomOperator
+
+```go
+func (t *Transpiler) HasCustomOperator(name string) bool
+```
+
+Checks if a custom operator is registered.
+
+<ParamField path="name" type="string" required>
+  Name of the operator to check
+</ParamField>
+
+<ResponseField name="return" type="bool">
+  `true` if the operator is registered, `false` otherwise
+</ResponseField>
+
+### ListCustomOperators
+
+```go
+func (t *Transpiler) ListCustomOperators() []string
+```
+
+Returns a slice of all registered custom operator names.
+
+<ResponseField name="return" type="[]string">
+  List of custom operator names
+</ResponseField>
+
+**Example:**
+
+```go
+operators := transpiler.ListCustomOperators()
+fmt.Println(operators) // ["length", "contains", "now"]
+```
+
+### ClearCustomOperators
+
+```go
+func (t *Transpiler) ClearCustomOperators()
+```
+
+Removes all registered custom operators from the transpiler.
+
+**Example:**
+
+```go
+transpiler.ClearCustomOperators()
+fmt.Println(transpiler.ListCustomOperators()) // []
+```
+
+## See also
+
+- [Package-level functions](/api/functions) - Convenience functions that create transpiler instances
+- [Custom operator types](/api/types#custom-operators) - OperatorHandler and related interfaces
+- [Schema validation](/api/schema) - Optional schema support for field validation
+- [Error handling](/api/errors) - Structured error types returned by methods

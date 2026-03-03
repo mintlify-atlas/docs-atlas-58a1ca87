@@ -1,0 +1,512 @@
+---
+title: Array operators
+description: Array membership (in), transformations (map, filter, reduce), and conditions (all, some, none, merge)
+---
+
+Array operators provide membership checking, transformations, and conditional operations on array-typed fields.
+
+## in
+
+Checks if a value exists in an array, or if a substring exists in a string.
+
+### Array membership
+
+**JSON Logic:**
+```json
+{"in": [{"var": "country"}, ["US", "CA", "MX"]]}
+```
+
+**SQL output:**
+```sql
+WHERE country IN ('US', 'CA', 'MX')
+```
+
+<ParamField path="in" type="[value, array | string]" required>
+  Array with value to find and array/string to search in
+</ParamField>
+
+Checks if the `country` field is one of the specified values.
+
+### String containment
+
+**JSON Logic:**
+```json
+{"in": ["hello", "hello world"]}
+```
+
+**SQL output (BigQuery/Spanner):**
+```sql
+WHERE STRPOS('hello world', 'hello') > 0
+```
+
+**SQL output (PostgreSQL):**
+```sql
+WHERE POSITION('hello' IN 'hello world') > 0
+```
+
+Checks if "hello" exists as a substring in "hello world".
+
+### Array field membership (with schema)
+
+When the right-hand side is an array-typed field (defined in [Schema](/api/schema)), uses dialect-specific array membership syntax:
+
+```go
+schema := jsonlogic2sql.NewSchema([]jsonlogic2sql.FieldSchema{
+    {Name: "tags", Type: jsonlogic2sql.FieldTypeArray},
+})
+transpiler.SetSchema(schema)
+```
+
+**JSON Logic:**
+```json
+{"in": ["premium", {"var": "tags"}]}
+```
+
+**SQL output (BigQuery/Spanner):**
+```sql
+WHERE 'premium' IN UNNEST(tags)
+```
+
+**SQL output (PostgreSQL):**
+```sql
+WHERE 'premium' = ANY(tags)
+```
+
+**SQL output (DuckDB):**
+```sql
+WHERE 'premium' IN (SELECT UNNEST(tags))
+```
+
+### Variable on both sides
+
+**JSON Logic:**
+```json
+{"in": [{"var": "status"}, {"var": "allowed_statuses"}]}
+```
+
+**SQL output (with array schema):**
+```sql
+WHERE status IN UNNEST(allowed_statuses)
+```
+
+## map
+
+Transforms each element in an array using an expression.
+
+**JSON Logic:**
+```json
+{"map": [{"var": "numbers"}, {"+": [{"var": ""}, 1]}]}
+```
+
+**SQL output (BigQuery/Spanner):**
+```sql
+WHERE ARRAY(SELECT (elem + 1) FROM UNNEST(numbers) AS elem)
+```
+
+**SQL output (PostgreSQL):**
+```sql
+WHERE ARRAY(SELECT (elem + 1) FROM UNNEST(numbers) AS elem)
+```
+
+<ParamField path="map" type="[array, expression]" required>
+  Array with source array and transformation expression. Use `{"var": ""}` or `{"var": "item"}` to reference current element.
+</ParamField>
+
+### Accessing array elements
+
+Within the transformation expression, use an empty string or special variable name to reference the current element:
+
+```json
+{"map": [{"var": "prices"}, {"*": [{"var": ""}, 1.1]}]}
+```
+```sql
+WHERE ARRAY(SELECT (elem * 1.1) FROM UNNEST(prices) AS elem)
+```
+
+Applies 10% markup to each price in the array.
+
+### Complex transformations
+
+**Conditional transformation:**
+```json
+{
+  "map": [
+    {"var": "scores"},
+    {"if": [
+      {">": [{"var": ""}, 90]},
+      "A",
+      "B"
+    ]}
+  ]
+}
+```
+```sql
+WHERE ARRAY(SELECT CASE WHEN elem > 90 THEN 'A' ELSE 'B' END FROM UNNEST(scores) AS elem)
+```
+
+## filter
+
+Filters array elements based on a condition.
+
+**JSON Logic:**
+```json
+{"filter": [{"var": "scores"}, {">": [{"var": ""}, 70]}]}
+```
+
+**SQL output (BigQuery/Spanner):**
+```sql
+WHERE ARRAY(SELECT elem FROM UNNEST(scores) AS elem WHERE elem > 70)
+```
+
+**SQL output (PostgreSQL):**
+```sql
+WHERE ARRAY(SELECT elem FROM UNNEST(scores) AS elem WHERE elem > 70)
+```
+
+<ParamField path="filter" type="[array, condition]" required>
+  Array with source array and filter condition. Use `{"var": ""}` to reference current element.
+</ParamField>
+
+Returns a new array containing only elements that satisfy the condition.
+
+### Filter with equality
+
+**JSON Logic:**
+```json
+{"filter": [{"var": "statuses"}, {"==": [{"var": ""}, "active"]}]}
+```
+```sql
+WHERE ARRAY(SELECT elem FROM UNNEST(statuses) AS elem WHERE elem = 'active')
+```
+
+### Filter with complex condition
+
+**JSON Logic:**
+```json
+{
+  "filter": [
+    {"var": "amounts"},
+    {"and": [
+      {">": [{"var": ""}, 100]},
+      {"<": [{"var": ""}, 1000]}
+    ]}
+  ]
+}
+```
+```sql
+WHERE ARRAY(SELECT elem FROM UNNEST(amounts) AS elem WHERE (elem > 100 AND elem < 1000))
+```
+
+## reduce
+
+Reduces an array to a single value using an accumulator.
+
+**JSON Logic:**
+```json
+{"reduce": [
+  {"var": "numbers"},
+  {"+": [{"var": "accumulator"}, {"var": "current"}]},
+  0
+]}
+```
+
+**SQL output (BigQuery/Spanner):**
+```sql
+WHERE 0 + COALESCE((SELECT SUM(elem) FROM UNNEST(numbers) AS elem), 0)
+```
+
+<ParamField path="reduce" type="[array, expression, initial]" required>
+  Array with source array, reduction expression, and initial accumulator value. Use `{"var": "accumulator"}` and `{"var": "current"}` in the expression.
+</ParamField>
+
+### Sum array elements
+
+**JSON Logic:**
+```json
+{"reduce": [{"var": "prices"}, {"+": [{"var": "accumulator"}, {"var": "current"}]}, 0]}
+```
+
+Sums all prices in the array.
+
+### Count matching elements
+
+**JSON Logic:**
+```json
+{
+  "reduce": [
+    {"var": "values"},
+    {"+": [
+      {"var": "accumulator"},
+      {"if": [{">": [{"var": "current"}, 50]}, 1, 0]}
+    ]},
+    0
+  ]
+}
+```
+
+Counts elements greater than 50.
+
+## all
+
+Checks if all elements in an array satisfy a condition.
+
+**JSON Logic:**
+```json
+{"all": [{"var": "ages"}, {">=": [{"var": ""}, 18]}]}
+```
+
+**SQL output (BigQuery/Spanner):**
+```sql
+WHERE NOT EXISTS (SELECT 1 FROM UNNEST(ages) AS elem WHERE NOT (elem >= 18))
+```
+
+**SQL output (PostgreSQL):**
+```sql
+WHERE NOT EXISTS (SELECT 1 FROM UNNEST(ages) AS elem WHERE NOT (elem >= 18))
+```
+
+<ParamField path="all" type="[array, condition]" required>
+  Array with source array and condition. Use `{"var": ""}` to reference current element.
+</ParamField>
+
+Returns true if **all** elements satisfy the condition (or if array is empty).
+
+### All elements equal a value
+
+**JSON Logic:**
+```json
+{"all": [{"var": "statuses"}, {"==": [{"var": ""}, "completed"]}]}
+```
+```sql
+WHERE NOT EXISTS (SELECT 1 FROM UNNEST(statuses) AS elem WHERE NOT (elem = 'completed'))
+```
+
+### All elements in range
+
+**JSON Logic:**
+```json
+{
+  "all": [
+    {"var": "scores"},
+    {"and": [
+      {">=": [{"var": ""}, 0]},
+      {"<=": [{"var": ""}, 100]}
+    ]}
+  ]
+}
+```
+```sql
+WHERE NOT EXISTS (SELECT 1 FROM UNNEST(scores) AS elem WHERE NOT (elem >= 0 AND elem <= 100))
+```
+
+## some
+
+Checks if at least one element in an array satisfies a condition.
+
+**JSON Logic:**
+```json
+{"some": [{"var": "statuses"}, {"==": [{"var": ""}, "active"]}]}
+```
+
+**SQL output (BigQuery/Spanner):**
+```sql
+WHERE EXISTS (SELECT 1 FROM UNNEST(statuses) AS elem WHERE elem = 'active')
+```
+
+**SQL output (PostgreSQL):**
+```sql
+WHERE EXISTS (SELECT 1 FROM UNNEST(statuses) AS elem WHERE elem = 'active')
+```
+
+<ParamField path="some" type="[array, condition]" required>
+  Array with source array and condition. Use `{"var": ""}` to reference current element.
+</ParamField>
+
+Returns true if **any** element satisfies the condition.
+
+### Any element above threshold
+
+**JSON Logic:**
+```json
+{"some": [{"var": "amounts"}, {">": [{"var": ""}, 1000]}]}
+```
+```sql
+WHERE EXISTS (SELECT 1 FROM UNNEST(amounts) AS elem WHERE elem > 1000)
+```
+
+### Any element in set
+
+**JSON Logic:**
+```json
+{
+  "some": [
+    {"var": "tags"},
+    {"in": [{"var": ""}, ["urgent", "critical", "emergency"]]}
+  ]
+}
+```
+```sql
+WHERE EXISTS (SELECT 1 FROM UNNEST(tags) AS elem WHERE elem IN ('urgent', 'critical', 'emergency'))
+```
+
+## none
+
+Checks if no elements in an array satisfy a condition.
+
+**JSON Logic:**
+```json
+{"none": [{"var": "values"}, {"==": [{"var": ""}, "invalid"]}]}
+```
+
+**SQL output (BigQuery/Spanner):**
+```sql
+WHERE NOT EXISTS (SELECT 1 FROM UNNEST(values) AS elem WHERE elem = 'invalid')
+```
+
+**SQL output (PostgreSQL):**
+```sql
+WHERE NOT EXISTS (SELECT 1 FROM UNNEST(values) AS elem WHERE elem = 'invalid')
+```
+
+<ParamField path="none" type="[array, condition]" required>
+  Array with source array and condition. Use `{"var": ""}` to reference current element.
+</ParamField>
+
+Returns true if **no** elements satisfy the condition (or if array is empty).
+
+### No negative values
+
+**JSON Logic:**
+```json
+{"none": [{"var": "amounts"}, {"<": [{"var": ""}, 0]}]}
+```
+```sql
+WHERE NOT EXISTS (SELECT 1 FROM UNNEST(amounts) AS elem WHERE elem < 0)
+```
+
+### No forbidden values
+
+**JSON Logic:**
+```json
+{
+  "none": [
+    {"var": "tags"},
+    {"in": [{"var": ""}, ["spam", "blocked", "deleted"]]}
+  ]
+}
+```
+```sql
+WHERE NOT EXISTS (SELECT 1 FROM UNNEST(tags) AS elem WHERE elem IN ('spam', 'blocked', 'deleted'))
+```
+
+## merge
+
+Concatenates multiple arrays into a single array.
+
+**JSON Logic:**
+```json
+{"merge": [{"var": "array1"}, {"var": "array2"}]}
+```
+
+**SQL output (BigQuery/Spanner):**
+```sql
+WHERE ARRAY_CONCAT(array1, array2)
+```
+
+**SQL output (PostgreSQL):**
+```sql
+WHERE array1 || array2
+```
+
+**SQL output (DuckDB):**
+```sql
+WHERE ARRAY_CONCAT(array1, array2)
+```
+
+<ParamField path="merge" type="[array1, array2, ...]" required>
+  Array of arrays to concatenate
+</ParamField>
+
+### Merge multiple arrays
+
+**JSON Logic:**
+```json
+{"merge": [{"var": "tags"}, {"var": "categories"}, ["general"]]}
+```
+```sql
+WHERE ARRAY_CONCAT(tags, categories, ARRAY['general'])
+```
+
+### Merge with literals
+
+**JSON Logic:**
+```json
+{"merge": [["a", "b"], ["c", "d"]]}
+```
+```sql
+WHERE ARRAY_CONCAT(ARRAY['a', 'b'], ARRAY['c', 'd'])
+```
+
+## Comparison of array operators
+
+| Operator | Purpose | Returns |
+|----------|---------|--------|
+| `in` | Membership check | Boolean - value exists in array |
+| `map` | Transform elements | New array with transformed values |
+| `filter` | Select elements | New array with matching elements |
+| `reduce` | Aggregate to single value | Single value (sum, count, etc.) |
+| `all` | Check all match | Boolean - all elements satisfy condition |
+| `some` | Check any match | Boolean - at least one element satisfies |
+| `none` | Check none match | Boolean - no elements satisfy condition |
+| `merge` | Concatenate arrays | Single array containing all elements |
+
+## Practical examples
+
+### Find users with premium tag
+
+```json
+{"in": ["premium", {"var": "user_tags"}]}
+```
+
+### Get high-value orders
+
+```json
+{"filter": [{"var": "order_amounts"}, {">": [{"var": ""}, 1000]}]}
+```
+
+### Check all items shipped
+
+```json
+{"all": [{"var": "item_statuses"}, {"==": [{"var": ""}, "shipped"]}]}
+```
+
+### Check if any order is pending
+
+```json
+{"some": [{"var": "order_statuses"}, {"==": [{"var": ""}, "pending"]}]}
+```
+
+### Ensure no negative values
+
+```json
+{"none": [{"var": "transaction_amounts"}, {"<": [{"var": ""}, 0]}]}
+```
+
+### Calculate total from array
+
+```json
+{"reduce": [{"var": "amounts"}, {"+": [{"var": "accumulator"}, {"var": "current"}]}, 0]}
+```
+
+## Error codes
+
+- `E300` (ErrInsufficientArgs) - Not enough arguments provided
+- `E301` (ErrTooManyArgs) - Too many arguments provided
+- `E302` (ErrInvalidArgument) - Argument is not an array or has wrong type
+- `E202` (ErrInvalidFieldType) - Field is not an array type (when schema validation is enabled)
+
+## See also
+
+- [String operators](/api/operators/string) - String-specific operations including substring search
+- [Logical operators](/api/operators/logical) - Combine array conditions with and/or
+- [Schema validation](/api/schema) - Define array-typed fields for validation

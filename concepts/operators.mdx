@@ -1,0 +1,601 @@
+---
+title: Operators
+description: Complete reference of all JSON Logic operators supported by jsonlogic2sql
+---
+
+jsonlogic2sql supports the full JSON Logic specification, converting all operators to dialect-appropriate SQL. Operators are organized by category for easy reference.
+
+## Data access
+
+These operators retrieve and validate field values from your data.
+
+| Operator | Description | Example |
+|----------|-------------|----------|
+| `var` | Access variable values | `{"var": "name"}` |
+| `missing` | Check if variables are null | `{"missing": "email"}` |
+| `missing_some` | Check if some variables are missing | `{"missing_some": [1, ["a", "b"]]}` |
+
+### Variable access
+
+The `var` operator accesses field values. It supports default values and array indexing.
+
+<Tabs>
+  <Tab title="JSON Logic">
+    ```json
+    {"var": "name"}
+    ```
+  </Tab>
+  <Tab title="SQL">
+    ```sql
+    WHERE name
+    ```
+  </Tab>
+</Tabs>
+
+### Variable with default value
+
+Provide a fallback when a field might be null:
+
+<Tabs>
+  <Tab title="JSON Logic">
+    ```json
+    {"var": ["status", "pending"]}
+    ```
+  </Tab>
+  <Tab title="SQL">
+    ```sql
+    WHERE COALESCE(status, 'pending')
+    ```
+  </Tab>
+</Tabs>
+
+### Variable with array index
+
+Access array elements by numeric index:
+
+<Tabs>
+  <Tab title="JSON Logic">
+    ```json
+    {"var": 1}
+    ```
+  </Tab>
+  <Tab title="SQL">
+    ```sql
+    WHERE data[1]
+    ```
+  </Tab>
+</Tabs>
+
+### Missing field checks
+
+Check for null values across single or multiple fields:
+
+<Tabs>
+  <Tab title="Single field">
+    ```json
+    {"missing": "email"}
+    ```
+    ```sql
+    WHERE email IS NULL
+    ```
+  </Tab>
+  <Tab title="Multiple fields">
+    ```json
+    {"missing": ["email", "phone"]}
+    ```
+    ```sql
+    WHERE (email IS NULL OR phone IS NULL)
+    ```
+  </Tab>
+</Tabs>
+
+## Logical operations
+
+Boolean logic and conditional expressions.
+
+| Operator | Description |
+|----------|-------------|
+| `if` | Conditional expressions (CASE WHEN) |
+| `==`, `===` | Equality comparison |
+| `!=`, `!==` | Inequality comparison |
+| `!` | Logical NOT |
+| `!!` | Boolean conversion |
+| `or` | Logical OR |
+| `and` | Logical AND |
+
+### Equality and inequality
+
+Both `==` and `===` generate the same SQL (strict equality in JavaScript has no SQL equivalent):
+
+<Tabs>
+  <Tab title="Equality">
+    ```json
+    {"==": [{"var": "status"}, "active"]}
+    ```
+    ```sql
+    WHERE status = 'active'
+    ```
+  </Tab>
+  <Tab title="Inequality">
+    ```json
+    {"!=": [{"var": "status"}, "inactive"]}
+    ```
+    ```sql
+    WHERE status != 'inactive'
+    ```
+  </Tab>
+</Tabs>
+
+<Note>
+  NULL comparisons are automatically converted to `IS NULL` / `IS NOT NULL`:
+  - `{"==": [{"var": "field"}, null]}` → `field IS NULL`
+  - `{"!=": [{"var": "field"}, null]}` → `field IS NOT NULL`
+</Note>
+
+### Logical AND/OR
+
+Combine multiple conditions:
+
+<Tabs>
+  <Tab title="AND">
+    ```json
+    {"and": [
+      {">": [{"var": "amount"}, 5000]},
+      {"==": [{"var": "status"}, "pending"]}
+    ]}
+    ```
+    ```sql
+    WHERE (amount > 5000 AND status = 'pending')
+    ```
+  </Tab>
+  <Tab title="OR">
+    ```json
+    {"or": [
+      {">=": [{"var": "failedAttempts"}, 5]},
+      {"in": [{"var": "country"}, ["CN", "RU"]]}
+    ]}
+    ```
+    ```sql
+    WHERE (failedAttempts >= 5 OR country IN ('CN', 'RU'))
+    ```
+  </Tab>
+</Tabs>
+
+### Negation
+
+Invert boolean expressions:
+
+```json
+{"!": [{"var": "isDeleted"}]}
+```
+```sql
+WHERE NOT (isDeleted)
+```
+
+### Boolean conversion
+
+The `!!` operator converts values to boolean (truthiness check):
+
+```json
+{"!!": [{"var": "value"}]}
+```
+
+**Without schema:**
+```sql
+WHERE (value IS NOT NULL AND value != FALSE AND value != 0 AND value != '')
+```
+
+**With schema** (generates type-appropriate checks):
+- Boolean fields: `value IS TRUE`
+- String fields: `value IS NOT NULL AND value != ''`
+- Numeric fields: `value IS NOT NULL AND value != 0`
+- Array fields: `value IS NOT NULL AND CARDINALITY(value) > 0`
+
+### Conditional expressions
+
+Generate SQL CASE WHEN statements:
+
+```json
+{"if": [
+  {">": [{"var": "age"}, 18]},
+  "adult",
+  "minor"
+]}
+```
+```sql
+WHERE CASE WHEN age > 18 THEN 'adult' ELSE 'minor' END
+```
+
+## Comparison operations
+
+Numeric and string ordering comparisons.
+
+| Operator | Description |
+|----------|-------------|
+| `>`, `>=`, `<`, `<=` | Comparison operators |
+| `max`, `min` | Maximum/minimum values |
+
+### Numeric comparisons
+
+<Tabs>
+  <Tab title="Greater than">
+    ```json
+    {">": [{"var": "amount"}, 1000]}
+    ```
+    ```sql
+    WHERE amount > 1000
+    ```
+  </Tab>
+  <Tab title="Less than or equal">
+    ```json
+    {"<=": [{"var": "count"}, 10]}
+    ```
+    ```sql
+    WHERE count <= 10
+    ```
+  </Tab>
+</Tabs>
+
+### Chained comparisons
+
+Multiple arguments create chained conditions:
+
+```json
+{"<": [10, {"var": "x"}, 20, 30]}
+```
+```sql
+WHERE (10 < x AND x < 20 AND 20 < 30)
+```
+
+### Min/max values
+
+Find minimum or maximum across multiple values:
+
+<Tabs>
+  <Tab title="Maximum">
+    ```json
+    {"max": [{"var": "score1"}, {"var": "score2"}, {"var": "score3"}]}
+    ```
+    ```sql
+    WHERE GREATEST(score1, score2, score3)
+    ```
+  </Tab>
+  <Tab title="Minimum">
+    ```json
+    {"min": [{"var": "price1"}, {"var": "price2"}]}
+    ```
+    ```sql
+    WHERE LEAST(price1, price2)
+    ```
+  </Tab>
+</Tabs>
+
+## Arithmetic operations
+
+Mathematical operations on numeric values.
+
+| Operator | Description |
+|----------|-------------|
+| `+` | Addition |
+| `-` | Subtraction |
+| `*` | Multiplication |
+| `/` | Division |
+| `%` | Modulo |
+
+### Binary operations
+
+<Tabs>
+  <Tab title="Addition">
+    ```json
+    {"+": [{"var": "price"}, {"var": "tax"}]}
+    ```
+    ```sql
+    WHERE (price + tax)
+    ```
+  </Tab>
+  <Tab title="Multiplication">
+    ```json
+    {"*": [{"var": "price"}, 1.2]}
+    ```
+    ```sql
+    WHERE (price * 1.2)
+    ```
+  </Tab>
+  <Tab title="Modulo">
+    ```json
+    {"%": [{"var": "count"}, 3]}
+    ```
+    ```sql
+    WHERE (count % 3)
+    ```
+  </Tab>
+</Tabs>
+
+### Unary operations
+
+<Tabs>
+  <Tab title="Negation">
+    ```json
+    {"-": [{"var": "value"}]}
+    ```
+    ```sql
+    WHERE -value
+    ```
+  </Tab>
+  <Tab title="Numeric cast">
+    ```json
+    {"+": ["-5"]}
+    ```
+    ```sql
+    WHERE CAST(-5 AS NUMERIC)
+    ```
+  </Tab>
+</Tabs>
+
+## Array operations
+
+Powerful array manipulation and querying.
+
+| Operator | Description |
+|----------|-------------|
+| `in` | Check if value is in array |
+| `map` | Transform array elements |
+| `filter` | Filter array by condition |
+| `reduce` | Reduce array to single value |
+| `all` | Check if all elements match |
+| `some` | Check if some elements match |
+| `none` | Check if no elements match |
+| `merge` | Concatenate arrays |
+
+### Array membership
+
+Check if a value exists in a literal array:
+
+```json
+{"in": [{"var": "country"}, ["US", "CA", "MX"]]}
+```
+```sql
+WHERE country IN ('US', 'CA', 'MX')
+```
+
+When the right side is an array-typed field (requires schema), generates dialect-specific syntax:
+
+<Tabs>
+  <Tab title="BigQuery/Spanner">
+    ```sql
+    WHERE value IN UNNEST(array)
+    ```
+  </Tab>
+  <Tab title="PostgreSQL">
+    ```sql
+    WHERE value = ANY(array)
+    ```
+  </Tab>
+  <Tab title="DuckDB">
+    ```sql
+    WHERE list_contains(array, value)
+    ```
+  </Tab>
+  <Tab title="ClickHouse">
+    ```sql
+    WHERE has(array, value)
+    ```
+  </Tab>
+</Tabs>
+
+### Map transformation
+
+Transform each element in an array:
+
+```json
+{"map": [{"var": "numbers"}, {"+": [{"var": "item"}, 1]}]}
+```
+
+<Tabs>
+  <Tab title="Standard SQL">
+    ```sql
+    WHERE ARRAY(SELECT (elem + 1) FROM UNNEST(numbers) AS elem)
+    ```
+  </Tab>
+  <Tab title="ClickHouse">
+    ```sql
+    WHERE arrayMap(elem -> (elem + 1), numbers)
+    ```
+  </Tab>
+</Tabs>
+
+### Filter array
+
+Select elements matching a condition:
+
+```json
+{"filter": [{"var": "scores"}, {">": [{"var": "item"}, 70]}]}
+```
+
+<Tabs>
+  <Tab title="Standard SQL">
+    ```sql
+    WHERE ARRAY(SELECT elem FROM UNNEST(scores) AS elem WHERE elem > 70)
+    ```
+  </Tab>
+  <Tab title="ClickHouse">
+    ```sql
+    WHERE arrayFilter(elem -> elem > 70, scores)
+    ```
+  </Tab>
+</Tabs>
+
+### Reduce array
+
+Aggregate array elements. Common patterns are optimized:
+
+```json
+{"reduce": [
+  {"var": "numbers"},
+  {"+": [{"var": "accumulator"}, {"var": "current"}]},
+  0
+]}
+```
+```sql
+WHERE 0 + COALESCE((SELECT SUM(elem) FROM UNNEST(numbers) AS elem), 0)
+```
+
+<Note>
+  The transpiler detects common reduction patterns (`+`, `min`, `max`) and generates optimized SQL using aggregate functions instead of general reduction logic.
+</Note>
+
+### Quantified array checks
+
+Check if all, some, or no elements satisfy a condition:
+
+<Tabs>
+  <Tab title="All">
+    ```json
+    {"all": [{"var": "ages"}, {">=": [{"var": ""}, 18]}]}
+    ```
+    ```sql
+    WHERE NOT EXISTS (SELECT 1 FROM UNNEST(ages) AS elem WHERE NOT (elem >= 18))
+    ```
+  </Tab>
+  <Tab title="Some">
+    ```json
+    {"some": [{"var": "statuses"}, {"==": [{"var": ""}, "active"]}]}
+    ```
+    ```sql
+    WHERE EXISTS (SELECT 1 FROM UNNEST(statuses) AS elem WHERE elem = 'active')
+    ```
+  </Tab>
+  <Tab title="None">
+    ```json
+    {"none": [{"var": "values"}, {"==": [{"var": ""}, "invalid"]}]}
+    ```
+    ```sql
+    WHERE NOT EXISTS (SELECT 1 FROM UNNEST(values) AS elem WHERE elem = 'invalid')
+    ```
+  </Tab>
+</Tabs>
+
+<Note>
+  In array operation conditions, `{"var": ""}` references the current element being processed.
+</Note>
+
+### Merge arrays
+
+Concatenate multiple arrays:
+
+```json
+{"merge": [{"var": "array1"}, {"var": "array2"}]}
+```
+
+Generates dialect-specific concatenation:
+- **BigQuery/Spanner/DuckDB**: `ARRAY_CONCAT(array1, array2)`
+- **PostgreSQL**: `(array1 || array2)`
+- **ClickHouse**: `arrayConcat(array1, array2)`
+
+## String operations
+
+String manipulation and pattern matching.
+
+| Operator | Description |
+|----------|-------------|
+| `in` | Check if substring exists |
+| `cat` | Concatenate strings |
+| `substr` | Extract substring |
+
+### String containment
+
+Check if a substring exists within a string:
+
+```json
+{"in": ["hello", "hello world"]}
+```
+```sql
+WHERE POSITION('hello' IN 'hello world') > 0
+```
+
+### String concatenation
+
+Join multiple strings:
+
+```json
+{"cat": [{"var": "firstName"}, " ", {"var": "lastName"}]}
+```
+```sql
+WHERE CONCAT(firstName, ' ', lastName)
+```
+
+Works with conditional expressions:
+
+```json
+{"cat": [
+  {"if": [{"==": [{"var": "gender"}, "M"]}, "Mr. ", "Ms. "]},
+  {"var": "first_name"},
+  " ",
+  {"var": "last_name"}
+]}
+```
+```sql
+WHERE CONCAT(CASE WHEN (gender = 'M') THEN 'Mr. ' ELSE 'Ms. ' END, first_name, ' ', last_name)
+```
+
+### Substring extraction
+
+Extract portions of strings (indices are 0-based in JSON Logic, converted to 1-based for SQL):
+
+<Tabs>
+  <Tab title="With length">
+    ```json
+    {"substr": [{"var": "email"}, 0, 10]}
+    ```
+    ```sql
+    WHERE SUBSTR(email, 1, 10)
+    ```
+  </Tab>
+  <Tab title="Without length">
+    ```json
+    {"substr": [{"var": "email"}, 4]}
+    ```
+    ```sql
+    WHERE SUBSTR(email, 5)
+    ```
+  </Tab>
+</Tabs>
+
+<Note>
+  **ClickHouse** uses `substring()` instead of `SUBSTR()` to match its SQL syntax.
+</Note>
+
+## Operator composition
+
+All operators can be freely nested and composed to create complex expressions:
+
+```json
+{"and": [
+  {"or": [
+    {"==": [{"var": "type"}, "premium"]},
+    {">=": [{"var": "revenue"}, 50000]}
+  ]},
+  {"some": [
+    {"var": "tags"},
+    {"in": [{"var": ""}, ["featured", "promoted"]]}
+  ]}
+]}
+```
+```sql
+WHERE (
+  (type = 'premium' OR revenue >= 50000)
+  AND
+  EXISTS (SELECT 1 FROM UNNEST(tags) AS elem WHERE elem IN ('featured', 'promoted'))
+)
+```
+
+## See also
+
+<CardGroup cols={2}>
+  <Card title="SQL dialects" icon="database" href="/concepts/dialects">
+    Learn how operators generate dialect-specific SQL
+  </Card>
+  <Card title="Transpilation" icon="arrows-rotate" href="/concepts/transpilation">
+    Understand the conversion process
+  </Card>
+</CardGroup>

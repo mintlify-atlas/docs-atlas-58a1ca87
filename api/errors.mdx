@@ -1,0 +1,420 @@
+---
+title: Error handling
+description: TranspileError, ErrorCode constants, and error handling utilities
+---
+
+The jsonlogic2sql library provides structured error types for robust error handling. All transpilation errors are wrapped in `TranspileError` with specific error codes for programmatic handling.
+
+## TranspileError
+
+```go
+type TranspileError struct {
+    Code     ErrorCode // Error code (e.g., ErrUnsupportedOperator)
+    Operator string    // The operator that caused the error
+    Path     string    // JSONPath to the error location (e.g., "$.and[0].>")
+    Message  string    // Human-readable error message
+    Cause    error     // Underlying error (if any)
+}
+```
+
+Structured error type returned by all transpilation operations. Provides detailed context about what went wrong and where.
+
+<ParamField path="Code" type="ErrorCode">
+  Specific error code for programmatic handling (e.g., `ErrUnsupportedOperator`, `ErrInsufficientArgs`)
+</ParamField>
+
+<ParamField path="Operator" type="string">
+  Name of the operator that caused the error. May be empty for structural errors.
+</ParamField>
+
+<ParamField path="Path" type="string">
+  JSONPath indicating where the error occurred in the JSON Logic expression (e.g., `"$.and[0].>"`, `"$.if[1]"`)
+</ParamField>
+
+<ParamField path="Message" type="string">
+  Human-readable description of the error
+</ParamField>
+
+<ParamField path="Cause" type="error">
+  Underlying error that caused this error, if any. Used with `errors.Unwrap()`.
+</ParamField>
+
+### Methods
+
+#### Error
+
+```go
+func (e *TranspileError) Error() string
+```
+
+Returns a formatted error message including code, path, operator, and message.
+
+**Example output:**
+```
+[E100] at $.and[0] (operator: custom_op): unsupported operator: custom_op
+```
+
+#### Unwrap
+
+```go
+func (e *TranspileError) Unwrap() error
+```
+
+Returns the underlying cause for `errors.Is` and `errors.As` support.
+
+### Usage example
+
+```go
+sql, err := transpiler.Transpile(jsonLogic)
+if err != nil {
+    var tpErr *jsonlogic2sql.TranspileError
+    if errors.As(err, &tpErr) {
+        fmt.Printf("Error Code: %s\n", tpErr.Code)
+        fmt.Printf("Operator: %s\n", tpErr.Operator)
+        fmt.Printf("Path: %s\n", tpErr.Path)
+        fmt.Printf("Message: %s\n", tpErr.Message)
+        
+        // Handle specific error codes
+        switch tpErr.Code {
+        case jsonlogic2sql.ErrUnsupportedOperator:
+            fmt.Println("Unknown operator - consider registering a custom operator")
+        case jsonlogic2sql.ErrFieldNotInSchema:
+            fmt.Println("Field validation failed - check your schema")
+        }
+    }
+}
+```
+
+## ErrorCode
+
+```go
+type ErrorCode string
+```
+
+Represents a specific error condition. Codes are organized by category for easy identification.
+
+### Error code categories
+
+| Range | Category | Description |
+|-------|----------|-------------|
+| E001-E099 | Structural/validation | JSON structure and validation errors |
+| E100-E199 | Operator-specific | Operator-related errors |
+| E200-E299 | Type/schema | Type mismatches and schema validation |
+| E300-E399 | Argument | Argument count and type errors |
+
+## Error code constants
+
+### Structural/validation errors (E001-E099)
+
+<ParamField path="ErrInvalidExpression" type="ErrorCode" default="E001">
+  The expression type is not valid JSON Logic
+</ParamField>
+
+<ParamField path="ErrEmptyArray" type="ErrorCode" default="E002">
+  An array cannot be empty in this context
+</ParamField>
+
+<ParamField path="ErrMultipleKeys" type="ErrorCode" default="E003">
+  An operator object must have exactly one key
+</ParamField>
+
+<ParamField path="ErrPrimitiveNotAllowed" type="ErrorCode" default="E004">
+  Primitive values are not allowed in this context (e.g., at top level)
+</ParamField>
+
+<ParamField path="ErrArrayNotAllowed" type="ErrorCode" default="E005">
+  Arrays are not allowed in this context (e.g., at top level)
+</ParamField>
+
+<ParamField path="ErrValidation" type="ErrorCode" default="E006">
+  A general validation error occurred
+</ParamField>
+
+<ParamField path="ErrInvalidJSON" type="ErrorCode" default="E007">
+  The input is not valid JSON
+</ParamField>
+
+**Example:**
+```go
+// Invalid JSON
+sql, err := transpiler.Transpile(`{"and": [}`) // Missing closing brace
+// Error: [E007] invalid JSON: unexpected character '}'
+
+// Multiple keys in operator
+logic := map[string]interface{}{
+    "and": []interface{}{},
+    "or":  []interface{}{},
+}
+sql, err := transpiler.TranspileFromMap(logic)
+// Error: [E003] operator object must have exactly one key
+```
+
+### Operator-specific errors (E100-E199)
+
+<ParamField path="ErrUnsupportedOperator" type="ErrorCode" default="E100">
+  The operator is not recognized or supported
+</ParamField>
+
+<ParamField path="ErrOperatorRequiresArray" type="ErrorCode" default="E101">
+  The operator requires array arguments
+</ParamField>
+
+<ParamField path="ErrCustomOperatorFailed" type="ErrorCode" default="E102">
+  A custom operator returned an error
+</ParamField>
+
+**Example:**
+```go
+// Unsupported operator
+sql, err := transpiler.Transpile(`{"unknown_op": [1, 2]}`)
+// Error: [E100] at $.unknown_op (operator: unknown_op): unsupported operator: unknown_op
+
+// Operator requires array
+sql, err := transpiler.Transpile(`{"and": "not an array"}`)
+// Error: [E101] at $.and (operator: and): and operator requires array arguments
+```
+
+### Type/schema errors (E200-E299)
+
+<ParamField path="ErrTypeMismatch" type="ErrorCode" default="E200">
+  A type mismatch occurred in the expression
+</ParamField>
+
+<ParamField path="ErrFieldNotInSchema" type="ErrorCode" default="E201">
+  The field is not defined in the schema
+</ParamField>
+
+<ParamField path="ErrInvalidFieldType" type="ErrorCode" default="E202">
+  The field type is incompatible with the operation
+</ParamField>
+
+<ParamField path="ErrInvalidEnumValue" type="ErrorCode" default="E203">
+  The value is not valid for the enum field
+</ParamField>
+
+**Example:**
+```go
+schema := jsonlogic2sql.NewSchema([]jsonlogic2sql.FieldSchema{
+    {Name: "age", Type: jsonlogic2sql.FieldTypeInteger},
+    {Name: "status", Type: jsonlogic2sql.FieldTypeEnum, AllowedValues: []string{"active", "inactive"}},
+})
+transpiler.SetSchema(schema)
+
+// Field not in schema
+sql, err := transpiler.Transpile(`{"var": "unknown_field"}`)
+// Error: [E201] at $.var (operator: var): field 'unknown_field' is not defined in schema
+
+// Invalid enum value
+sql, err := transpiler.Transpile(`{"==": [{"var": "status"}, "invalid"]}`)
+// Error: [E203] at $.== (operator: ==): invalid enum value 'invalid' for field 'status': allowed values are [active inactive]
+```
+
+### Argument errors (E300-E399)
+
+<ParamField path="ErrInsufficientArgs" type="ErrorCode" default="E300">
+  The operator requires more arguments
+</ParamField>
+
+<ParamField path="ErrTooManyArgs" type="ErrorCode" default="E301">
+  The operator received too many arguments
+</ParamField>
+
+<ParamField path="ErrInvalidArgument" type="ErrorCode" default="E302">
+  An argument is invalid
+</ParamField>
+
+<ParamField path="ErrInvalidArgType" type="ErrorCode" default="E303">
+  An argument has the wrong type
+</ParamField>
+
+<ParamField path="ErrInvalidDefaultValue" type="ErrorCode" default="E304">
+  The default value in a `var` expression is invalid
+</ParamField>
+
+**Example:**
+```go
+// Insufficient arguments
+sql, err := transpiler.Transpile(`{">": [5]}`)
+// Error: [E300] at $.> (operator: >): > operator requires at least 2 argument(s), got 1
+
+// Too many arguments  
+sql, err := transpiler.Transpile(`{"!": [true, false]}`)
+// Error: [E301] at $.! (operator: !): ! operator accepts at most 1 argument(s), got 2
+
+// Invalid argument type
+sql, err := transpiler.Transpile(`{"+": ["not a number", 5]}`)
+// Error: [E303] at $.+ (operator: +): invalid argument at index 0
+```
+
+## Helper functions
+
+### AsTranspileError
+
+```go
+func AsTranspileError(err error) (*TranspileError, bool)
+```
+
+Attempts to extract a `TranspileError` from an error chain.
+
+<ParamField path="err" type="error" required>
+  Error to inspect
+</ParamField>
+
+<ResponseField name="return" type="(*TranspileError, bool)">
+  The TranspileError and `true` if found, otherwise `nil` and `false`
+</ResponseField>
+
+**Example:**
+
+```go
+sql, err := transpiler.Transpile(jsonLogic)
+if tpErr, ok := jsonlogic2sql.AsTranspileError(err); ok {
+    log.Printf("Transpilation failed with code %s at %s", tpErr.Code, tpErr.Path)
+}
+```
+
+### IsErrorCode
+
+```go
+func IsErrorCode(err error, code ErrorCode) bool
+```
+
+Checks if an error has a specific error code.
+
+<ParamField path="err" type="error" required>
+  Error to check
+</ParamField>
+
+<ParamField path="code" type="ErrorCode" required>
+  Error code to check for
+</ParamField>
+
+<ResponseField name="return" type="bool">
+  `true` if the error is or wraps a TranspileError with the given code, `false` otherwise
+</ResponseField>
+
+**Example:**
+
+```go
+sql, err := transpiler.Transpile(jsonLogic)
+if jsonlogic2sql.IsErrorCode(err, jsonlogic2sql.ErrUnsupportedOperator) {
+    fmt.Println("Unknown operator - you may need to register a custom operator")
+    fmt.Println("See: https://github.com/h22rana/jsonlogic2sql#custom-operators")
+}
+
+if jsonlogic2sql.IsErrorCode(err, jsonlogic2sql.ErrFieldNotInSchema) {
+    fmt.Println("Field validation failed - check your schema definition")
+}
+```
+
+## Error handling patterns
+
+### Pattern 1: Check for specific error codes
+
+```go
+sql, err := transpiler.Transpile(jsonLogic)
+if err != nil {
+    switch {
+    case jsonlogic2sql.IsErrorCode(err, jsonlogic2sql.ErrUnsupportedOperator):
+        // Handle unknown operator
+        return fmt.Errorf("unsupported operator in filter expression: %w", err)
+    case jsonlogic2sql.IsErrorCode(err, jsonlogic2sql.ErrFieldNotInSchema):
+        // Handle schema validation error
+        return fmt.Errorf("invalid field reference: %w", err)
+    case jsonlogic2sql.IsErrorCode(err, jsonlogic2sql.ErrInvalidJSON):
+        // Handle JSON parsing error
+        return fmt.Errorf("malformed JSON Logic: %w", err)
+    default:
+        // Handle other errors
+        return fmt.Errorf("transpilation failed: %w", err)
+    }
+}
+```
+
+### Pattern 2: Extract detailed error information
+
+```go
+sql, err := transpiler.Transpile(jsonLogic)
+if err != nil {
+    if tpErr, ok := jsonlogic2sql.AsTranspileError(err); ok {
+        // Log structured error data
+        log.WithFields(log.Fields{
+            "error_code": tpErr.Code,
+            "operator":   tpErr.Operator,
+            "path":       tpErr.Path,
+            "message":    tpErr.Message,
+        }).Error("Transpilation failed")
+        
+        // Return user-friendly error
+        return nil, fmt.Errorf("invalid filter at %s: %s", tpErr.Path, tpErr.Message)
+    }
+}
+```
+
+### Pattern 3: Categorize errors
+
+```go
+func categorizeError(err error) string {
+    tpErr, ok := jsonlogic2sql.AsTranspileError(err)
+    if !ok {
+        return "unknown"
+    }
+    
+    code := string(tpErr.Code)
+    switch {
+    case code >= "E001" && code <= "E099":
+        return "structural"
+    case code >= "E100" && code <= "E199":
+        return "operator"
+    case code >= "E200" && code <= "E299":
+        return "schema"
+    case code >= "E300" && code <= "E399":
+        return "argument"
+    default:
+        return "unknown"
+    }
+}
+```
+
+### Pattern 4: User-friendly error messages
+
+```go
+func transpileWithFriendlyErrors(transpiler *jsonlogic2sql.Transpiler, logic string) (string, error) {
+    sql, err := transpiler.Transpile(logic)
+    if err != nil {
+        // Extract structured error
+        tpErr, ok := jsonlogic2sql.AsTranspileError(err)
+        if !ok {
+            return "", err
+        }
+        
+        // Generate user-friendly message based on error code
+        switch tpErr.Code {
+        case jsonlogic2sql.ErrUnsupportedOperator:
+            return "", fmt.Errorf(
+                "Unknown operator '%s' at %s. Valid operators include: ==, !=, >, <, and, or, in, etc.",
+                tpErr.Operator, tpErr.Path,
+            )
+        case jsonlogic2sql.ErrFieldNotInSchema:
+            return "", fmt.Errorf(
+                "Field referenced at %s is not defined in your schema. %s",
+                tpErr.Path, tpErr.Message,
+            )
+        case jsonlogic2sql.ErrInvalidEnumValue:
+            return "", fmt.Errorf(
+                "Invalid value at %s. %s",
+                tpErr.Path, tpErr.Message,
+            )
+        default:
+            return "", fmt.Errorf("Filter error at %s: %s", tpErr.Path, tpErr.Message)
+        }
+    }
+    return sql, nil
+}
+```
+
+## See also
+
+- [Transpiler methods](/api/transpiler) - Methods that return TranspileError
+- [Schema validation](/api/schema) - Schema-related errors (E201-E203)
+- [Custom operators](/api/transpiler#registeroperator) - Handling custom operator errors (E102)

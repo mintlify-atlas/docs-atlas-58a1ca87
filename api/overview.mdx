@@ -1,0 +1,160 @@
+---
+title: API overview
+description: Complete API reference for the jsonlogic2sql Go library
+---
+
+The jsonlogic2sql library provides a comprehensive API for converting JSON Logic expressions to SQL WHERE clauses across multiple SQL dialects.
+
+## Core components
+
+### Quick start functions
+
+For simple use cases, use the package-level convenience functions:
+
+- [Transpile()](/api/functions#transpile) - Convert JSON Logic to SQL WHERE clause
+- [TranspileCondition()](/api/functions#transpilecondition) - Convert to SQL condition without WHERE
+- [TranspileFromMap()](/api/functions#transpilefrommap) - Convert from parsed JSON
+
+### Transpiler instance
+
+For advanced use cases with custom operators or schema validation:
+
+- [Transpiler](/api/transpiler) - Main transpiler instance with full configuration
+- [NewTranspiler()](/api/functions#newtranspiler) - Create basic transpiler
+- [NewTranspilerWithConfig()](/api/functions#newtranspilerwithconfig) - Create with configuration
+
+### Type definitions
+
+Core types for configuration and customization:
+
+- [TranspilerConfig](/api/types#transpilerconfig) - Configuration options
+- [Dialect](/api/types#dialect) - SQL dialect constants
+- [OperatorHandler](/api/types#operatorhandler) - Custom operator interface
+- [OperatorRegistry](/api/types#operatorregistry) - Custom operator management
+
+### Schema validation
+
+Optional schema support for field validation:
+
+- [Schema](/api/schema#schema) - Field collection and validation
+- [FieldSchema](/api/schema#fieldschema) - Individual field definition
+- [FieldType](/api/schema#fieldtype) - Field type constants
+
+### Error handling
+
+Structured error types for robust error handling:
+
+- [TranspileError](/api/errors#transpileerror) - Structured error with code and path
+- [ErrorCode](/api/errors#errorcode) - Error code constants
+- [AsTranspileError()](/api/errors#astranspileerror) - Extract error from chain
+- [IsErrorCode()](/api/errors#iserrorcode) - Check specific error code
+
+## Supported operators
+
+The library supports all standard JSON Logic operators across multiple categories:
+
+### Data access operators
+
+- [var](/api/operators/data-access#var) - Variable access with default values
+- [missing](/api/operators/data-access#missing) - Check for missing fields
+- [missing_some](/api/operators/data-access#missing-some) - Check if some fields are missing
+
+### Logical operators
+
+- [if](/api/operators/logical#if) - Conditional expressions
+- [==, ===](/api/operators/logical#equality) - Equality comparison
+- [!=, !==](/api/operators/logical#inequality) - Inequality comparison
+- [and](/api/operators/logical#and) - Logical AND
+- [or](/api/operators/logical#or) - Logical OR
+- [!](/api/operators/logical#not) - Logical NOT
+- [!!](/api/operators/logical#double-negation) - Boolean conversion
+
+### Numeric operators
+
+- [Comparison operators](/api/operators/numeric#comparison) - Greater than, less than, etc.
+- [Arithmetic operators](/api/operators/numeric#arithmetic) - Addition, subtraction, multiplication, etc.
+- [max, min](/api/operators/numeric#max-min) - Maximum and minimum
+
+### Array operators
+
+- [in](/api/operators/array#in) - Array membership
+- [map](/api/operators/array#map) - Transform array elements
+- [filter](/api/operators/array#filter) - Filter array elements
+- [reduce](/api/operators/array#reduce) - Reduce array to single value
+- [all](/api/operators/array#all) - Check if all elements match
+- [some](/api/operators/array#some) - Check if any element matches
+- [none](/api/operators/array#none) - Check if no elements match
+- [merge](/api/operators/array#merge) - Concatenate arrays
+
+### String operators
+
+- [cat](/api/operators/string#cat) - String concatenation
+- [substr](/api/operators/string#substr) - Substring extraction
+- [in](/api/operators/string#in) - String containment
+
+## Usage patterns
+
+### Simple transpilation
+
+```go
+import "github.com/h22rana/jsonlogic2sql"
+
+sql, err := jsonlogic2sql.Transpile(
+    jsonlogic2sql.DialectBigQuery,
+    `{"==": [{"var": "status"}, "active"]}`,
+)
+// Result: WHERE status = 'active'
+```
+
+### Transpiler with schema
+
+```go
+schema := jsonlogic2sql.NewSchema([]jsonlogic2sql.FieldSchema{
+    {Name: "amount", Type: jsonlogic2sql.FieldTypeNumber},
+    {Name: "status", Type: jsonlogic2sql.FieldTypeEnum, AllowedValues: []string{"active", "inactive"}},
+})
+
+config := &jsonlogic2sql.TranspilerConfig{
+    Dialect: jsonlogic2sql.DialectBigQuery,
+    Schema:  schema,
+}
+
+transpiler, err := jsonlogic2sql.NewTranspilerWithConfig(config)
+```
+
+### Custom operators
+
+```go
+transpiler, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery)
+
+transpiler.RegisterOperatorFunc("length", func(op string, args []interface{}) (string, error) {
+    if len(args) != 1 {
+        return "", fmt.Errorf("length requires exactly 1 argument")
+    }
+    return fmt.Sprintf("LENGTH(%s)", args[0]), nil
+})
+
+sql, _ := transpiler.Transpile(`{"length": [{"var": "email"}]}`)
+// Result: WHERE LENGTH(email)
+```
+
+### Error handling
+
+```go
+sql, err := transpiler.Transpile(jsonLogic)
+if err != nil {
+    if tpErr, ok := jsonlogic2sql.AsTranspileError(err); ok {
+        fmt.Printf("Error code: %s\n", tpErr.Code)
+        fmt.Printf("Path: %s\n", tpErr.Path)
+        fmt.Printf("Operator: %s\n", tpErr.Operator)
+    }
+}
+```
+
+## See also
+
+- [Package-level functions](/api/functions) - Convenience functions for quick usage
+- [Transpiler methods](/api/transpiler) - Full transpiler API
+- [Type definitions](/api/types) - All type definitions and constants
+- [Schema validation](/api/schema) - Optional schema support
+- [Error handling](/api/errors) - Structured error types

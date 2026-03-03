@@ -1,0 +1,403 @@
+---
+title: Schema validation
+description: Validate JSON Logic fields against a schema for type safety
+---
+
+Schema validation ensures that fields referenced in JSON Logic expressions exist and have the correct types. This prevents runtime errors and enables type-aware SQL generation.
+
+## Creating a schema
+
+### From Go code
+
+```go
+import "github.com/h22rana/jsonlogic2sql"
+
+schema := jsonlogic2sql.NewSchema([]jsonlogic2sql.FieldSchema{
+    {Name: "amount", Type: jsonlogic2sql.FieldTypeInteger},
+    {Name: "status", Type: jsonlogic2sql.FieldTypeString},
+    {Name: "verified", Type: jsonlogic2sql.FieldTypeBoolean},
+    {Name: "tags", Type: jsonlogic2sql.FieldTypeArray},
+})
+```
+
+### From JSON
+
+```go
+jsonData := `[
+    {"name": "user.name", "type": "string"},
+    {"name": "user.age", "type": "integer"},
+    {"name": "user.active", "type": "boolean"}
+]`
+
+schema, err := jsonlogic2sql.NewSchemaFromJSON([]byte(jsonData))
+if err != nil {
+    panic(err)
+}
+```
+
+### From file
+
+```go
+schema, err := jsonlogic2sql.NewSchemaFromFile("schema.json")
+if err != nil {
+    panic(err)
+}
+```
+
+## Using schema with transpiler
+
+### Method 1: SetSchema
+
+```go
+tr, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery)
+tr.SetSchema(schema)
+
+// Valid field - works
+sql, err := tr.Transpile(`{"==": [{"var": "amount"}, 100]}`)
+// Result: "WHERE amount = 100"
+
+// Invalid field - returns error
+_, err = tr.Transpile(`{"==": [{"var": "invalid_field"}, 100]}`)
+// Error: field "invalid_field" not found in schema
+```
+
+### Method 2: NewTranspilerWithConfig
+
+```go
+schema := jsonlogic2sql.NewSchema([]jsonlogic2sql.FieldSchema{
+    {Name: "amount", Type: jsonlogic2sql.FieldTypeInteger},
+    {Name: "status", Type: jsonlogic2sql.FieldTypeString},
+})
+
+config := &jsonlogic2sql.TranspilerConfig{
+    Dialect: jsonlogic2sql.DialectBigQuery,
+    Schema:  schema,
+}
+
+tr, err := jsonlogic2sql.NewTranspilerWithConfig(config)
+if err != nil {
+    panic(err)
+}
+```
+
+## Field type validation
+
+### Supported types
+
+- `FieldTypeString` - Text fields
+- `FieldTypeInteger` - Integer numbers
+- `FieldTypeFloat` - Floating-point numbers  
+- `FieldTypeBoolean` - Boolean values
+- `FieldTypeArray` - Array/list fields
+- `FieldTypeEnum` - Enumerated values
+
+### Example schema
+
+```go
+schema := jsonlogic2sql.NewSchema([]jsonlogic2sql.FieldSchema{
+    {Name: "order.items.count", Type: jsonlogic2sql.FieldTypeInteger},
+    {Name: "order.total.amount", Type: jsonlogic2sql.FieldTypeInteger},
+    {Name: "user.name", Type: jsonlogic2sql.FieldTypeString},
+    {Name: "user.tags", Type: jsonlogic2sql.FieldTypeArray},
+    {Name: "user.verified", Type: jsonlogic2sql.FieldTypeBoolean},
+})
+```
+
+## Dotted field names
+
+Schemas support nested field names with dots:
+
+```go
+schema := jsonlogic2sql.NewSchema([]jsonlogic2sql.FieldSchema{
+    {Name: "transaction.amount", Type: jsonlogic2sql.FieldTypeInteger},
+    {Name: "user.verified", Type: jsonlogic2sql.FieldTypeBoolean},
+    {Name: "user.accountAgeDays", Type: jsonlogic2sql.FieldTypeInteger},
+})
+
+tr, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery)
+tr.SetSchema(schema)
+
+sql, _ := tr.Transpile(`{">": [{"var": "transaction.amount"}, 10000]}`)
+// Result: "WHERE transaction.amount > 10000"
+```
+
+## Type-aware IN operator
+
+The schema enables type-aware behavior for the `in` operator:
+
+### Array field on right side
+
+```go
+schema := jsonlogic2sql.NewSchema([]jsonlogic2sql.FieldSchema{
+    {Name: "tags", Type: jsonlogic2sql.FieldTypeArray},
+})
+
+tr, _ := jsonlogic2sql.NewTranspilerWithConfig(&jsonlogic2sql.TranspilerConfig{
+    Dialect: jsonlogic2sql.DialectBigQuery,
+    Schema:  schema,
+})
+```
+
+<Tabs>
+  <Tab title="BigQuery">
+    <CodeGroup>
+    ```json JSON Logic
+    {"in": ["tag1", {"var": "tags"}]}
+    ```
+    
+    ```sql SQL Output
+    WHERE 'tag1' IN UNNEST(tags)
+    ```
+    </CodeGroup>
+  </Tab>
+  <Tab title="PostgreSQL">
+    <CodeGroup>
+    ```json JSON Logic
+    {"in": ["tag1", {"var": "tags"}]}
+    ```
+    
+    ```sql SQL Output
+    WHERE 'tag1' = ANY(tags)
+    ```
+    </CodeGroup>
+  </Tab>
+  <Tab title="DuckDB">
+    <CodeGroup>
+    ```json JSON Logic
+    {"in": ["tag1", {"var": "tags"}]}
+    ```
+    
+    ```sql SQL Output
+    WHERE list_contains(tags, 'tag1')
+    ```
+    </CodeGroup>
+  </Tab>
+  <Tab title="ClickHouse">
+    <CodeGroup>
+    ```json JSON Logic
+    {"in": ["tag1", {"var": "tags"}]}
+    ```
+    
+    ```sql SQL Output
+    WHERE has(tags, 'tag1')
+    ```
+    </CodeGroup>
+  </Tab>
+</Tabs>
+
+### String field on right side
+
+```go
+schema := jsonlogic2sql.NewSchema([]jsonlogic2sql.FieldSchema{
+    {Name: "description", Type: jsonlogic2sql.FieldTypeString},
+})
+
+tr, _ := jsonlogic2sql.NewTranspilerWithConfig(&jsonlogic2sql.TranspilerConfig{
+    Dialect: jsonlogic2sql.DialectBigQuery,
+    Schema:  schema,
+})
+```
+
+<Tabs>
+  <Tab title="BigQuery">
+    <CodeGroup>
+    ```json JSON Logic
+    {"in": ["hello", {"var": "description"}]}
+    ```
+    
+    ```sql SQL Output
+    WHERE STRPOS(description, 'hello') > 0
+    ```
+    </CodeGroup>
+  </Tab>
+  <Tab title="PostgreSQL">
+    <CodeGroup>
+    ```json JSON Logic
+    {"in": ["hello", {"var": "description"}]}
+    ```
+    
+    ```sql SQL Output
+    WHERE POSITION('hello' IN description) > 0
+    ```
+    </CodeGroup>
+  </Tab>
+</Tabs>
+
+## Schema query methods
+
+### Check if field exists
+
+```go
+if schema.HasField("user.name") {
+    fmt.Println("Field exists")
+}
+```
+
+### Validate field
+
+```go
+err := schema.ValidateField("user.name")
+if err != nil {
+    fmt.Println("Field does not exist:", err)
+}
+```
+
+### Get field type
+
+```go
+fieldType := schema.GetFieldTypeFieldType("amount")
+// Returns: FieldTypeInteger
+```
+
+### Check specific types
+
+```go
+if schema.IsStringType("user.name") {
+    fmt.Println("Field is a string")
+}
+
+if schema.IsNumericType("amount") {
+    fmt.Println("Field is numeric")
+}
+
+if schema.IsBooleanType("verified") {
+    fmt.Println("Field is boolean")
+}
+
+if schema.IsArrayType("tags") {
+    fmt.Println("Field is an array")
+}
+```
+
+### Get all fields
+
+```go
+fields := schema.GetFields()
+for _, field := range fields {
+    fmt.Println("Field:", field)
+}
+```
+
+## Enum fields
+
+Define fields with restricted values:
+
+```go
+schema := jsonlogic2sql.NewSchema([]jsonlogic2sql.FieldSchema{
+    {
+        Name:          "status",
+        Type:          jsonlogic2sql.FieldTypeEnum,
+        AllowedValues: []string{"active", "pending", "closed"},
+    },
+})
+
+// Get allowed values
+values := schema.GetAllowedValues("status")
+// Returns: ["active", "pending", "closed"]
+```
+
+## Schema validation examples
+
+### Valid query
+
+```go
+schema := jsonlogic2sql.NewSchema([]jsonlogic2sql.FieldSchema{
+    {Name: "amount", Type: jsonlogic2sql.FieldTypeInteger},
+    {Name: "status", Type: jsonlogic2sql.FieldTypeString},
+})
+
+tr, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery)
+tr.SetSchema(schema)
+
+sql, err := tr.Transpile(`{"==": [{"var": "amount"}, 100]}`)
+// Success: "WHERE amount = 100"
+```
+
+### Invalid field error
+
+```go
+_, err := tr.Transpile(`{"==": [{"var": "invalid_field"}, 100]}`)
+// Error: field "invalid_field" not found in schema
+```
+
+### Complex validation
+
+```go
+schema := jsonlogic2sql.NewSchema([]jsonlogic2sql.FieldSchema{
+    {Name: "transaction.amount", Type: jsonlogic2sql.FieldTypeInteger},
+    {Name: "user.verified", Type: jsonlogic2sql.FieldTypeBoolean},
+    {Name: "user.country", Type: jsonlogic2sql.FieldTypeString},
+})
+
+tr.SetSchema(schema)
+
+sql, err := tr.Transpile(`{
+    "and": [
+        {">": [{"var": "transaction.amount"}, 10000]},
+        {"==": [{"var": "user.verified"}, false]},
+        {"in": [{"var": "user.country"}, ["US", "CA"]]}
+    ]
+}`)
+// Success: all fields validated
+```
+
+## Optional schema
+
+Schemas are optional. Without a schema, all fields are accepted:
+
+```go
+tr, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery)
+// No schema set
+
+sql, err := tr.Transpile(`{"==": [{"var": "any_field"}, 100]}`)
+// Works: "WHERE any_field = 100"
+```
+
+## Schema JSON format
+
+The JSON format for schema files:
+
+```json schema.json
+[
+  {
+    "name": "user.name",
+    "type": "string"
+  },
+  {
+    "name": "user.age",
+    "type": "integer"
+  },
+  {
+    "name": "user.active",
+    "type": "boolean"
+  },
+  {
+    "name": "user.tags",
+    "type": "array"
+  },
+  {
+    "name": "status",
+    "type": "enum",
+    "allowed_values": ["active", "pending", "inactive"]
+  }
+]
+```
+
+## Benefits of schema validation
+
+1. **Early error detection** - Catch invalid field references before executing SQL
+2. **Type safety** - Ensure fields are used correctly based on their types
+3. **Dialect optimization** - Generate optimal SQL based on field types
+4. **Documentation** - Schema serves as documentation for valid fields
+5. **IDE support** - Can be used to provide autocomplete in UIs
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Dialect-specific examples" icon="database" href="/examples/dialect-specific">
+    See how SQL differs across database dialects
+  </Card>
+  <Card title="Custom operators" icon="wrench" href="/examples/custom-operators">
+    Extend with custom operators
+  </Card>
+</CardGroup>

@@ -1,0 +1,415 @@
+---
+title: Custom operators
+description: Extend jsonlogic2sql with custom operators for domain-specific logic
+---
+
+Custom operators allow you to extend jsonlogic2sql with domain-specific functionality. This guide shows real examples from the test suite.
+
+## Basic custom operators
+
+### LENGTH operator
+
+Create a custom operator for SQL's `LENGTH()` function:
+
+```go
+import "github.com/h22rana/jsonlogic2sql"
+
+type LengthOperator struct{}
+
+func (l *LengthOperator) ToSQL(operator string, args []interface{}) (string, error) {
+    if len(args) != 1 {
+        return "", fmt.Errorf("length requires exactly 1 argument, got %d", len(args))
+    }
+    return fmt.Sprintf("LENGTH(%s)", args[0]), nil
+}
+
+// Register the operator
+tr, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery)
+tr.RegisterOperator("length", &LengthOperator{})
+
+// Use it
+sql, _ := tr.Transpile(`{"length": [{"var": "email"}]}`)
+// Result: "WHERE LENGTH(email)"
+```
+
+<CodeGroup>
+```json JSON Logic
+{"length": [{"var": "email"}]}
+```
+
+```sql SQL Output
+WHERE LENGTH(email)
+```
+</CodeGroup>
+
+### UPPER operator
+
+Convert strings to uppercase:
+
+```go
+type UpperOperator struct{}
+
+func (u *UpperOperator) ToSQL(operator string, args []interface{}) (string, error) {
+    if len(args) != 1 {
+        return "", fmt.Errorf("upper requires exactly 1 argument, got %d", len(args))
+    }
+    return fmt.Sprintf("UPPER(%s)", args[0]), nil
+}
+
+tr.RegisterOperator("upper", &UpperOperator{})
+```
+
+<CodeGroup>
+```json JSON Logic
+{"==": [{"upper": [{"var": "name"}]}, "JOHN"]}
+```
+
+```sql SQL Output
+WHERE UPPER(name) = 'JOHN'
+```
+</CodeGroup>
+
+## Using function-based registration
+
+For simpler operators, use `RegisterOperatorFunc`:
+
+```go
+tr.RegisterOperatorFunc("length", func(op string, args []interface{}) (string, error) {
+    if len(args) != 1 {
+        return "", fmt.Errorf("length requires 1 argument")
+    }
+    return fmt.Sprintf("LENGTH(%s)", args[0]), nil
+})
+
+sql, _ := tr.Transpile(`{"length": [{"var": "email"}]}`)
+// Result: "WHERE LENGTH(email)"
+```
+
+## Custom operators with multiple arguments
+
+### COALESCE operator
+
+```go
+tr.RegisterOperatorFunc("coalesce", func(op string, args []interface{}) (string, error) {
+    result := "COALESCE("
+    for i, arg := range args {
+        if i > 0 {
+            result += ", "
+        }
+        result += fmt.Sprintf("%s", arg)
+    }
+    result += ")"
+    return result, nil
+})
+```
+
+<CodeGroup>
+```json JSON Logic
+{"coalesce": [{"var": "nickname"}, {"var": "name"}, "Unknown"]}
+```
+
+```sql SQL Output
+WHERE COALESCE(nickname, name, 'Unknown')
+```
+</CodeGroup>
+
+### REPEAT operator
+
+```go
+tr.RegisterOperatorFunc("repeat", func(op string, args []interface{}) (string, error) {
+    if len(args) != 2 {
+        return "", fmt.Errorf("repeat requires 2 arguments")
+    }
+    return fmt.Sprintf("REPEAT(%s, %s)", args[0], args[1]), nil
+})
+```
+
+<CodeGroup>
+```json JSON Logic
+{"repeat": [{"var": "char"}, 5]}
+```
+
+```sql SQL Output
+WHERE REPEAT(char, 5)
+```
+</CodeGroup>
+
+## Stateful custom operators
+
+Operators can maintain state:
+
+```go
+type ConcatWithSeparatorOperator struct {
+    Separator string
+}
+
+func (c *ConcatWithSeparatorOperator) ToSQL(operator string, args []interface{}) (string, error) {
+    if len(args) < 2 {
+        return "", fmt.Errorf("concat_ws requires at least 2 arguments")
+    }
+    result := fmt.Sprintf("%s", args[0])
+    for i := 1; i < len(args); i++ {
+        result += fmt.Sprintf(" || '%s' || %s", c.Separator, args[i])
+    }
+    return result, nil
+}
+
+tr.RegisterOperator("concat_ws", &ConcatWithSeparatorOperator{Separator: ", "})
+```
+
+<CodeGroup>
+```json JSON Logic
+{"concat_ws": [{"var": "first"}, {"var": "last"}]}
+```
+
+```sql SQL Output
+WHERE first || ', ' || last
+```
+</CodeGroup>
+
+## Custom operators in nested expressions
+
+### Length in comparison
+
+<CodeGroup>
+```json JSON Logic
+{">": [{"length": [{"var": "email"}]}, 10]}
+```
+
+```sql SQL Output
+WHERE LENGTH(email) > 10
+```
+</CodeGroup>
+
+### Nested in concatenation
+
+<CodeGroup>
+```json JSON Logic
+{"length": [{"cat": [{"var": "first"}, {"var": "last"}]}]}
+```
+
+```sql SQL Output
+WHERE LENGTH(CONCAT(first, last))
+```
+</CodeGroup>
+
+### Multiple custom operators
+
+```go
+tr.RegisterOperator("length", &LengthOperator{})
+tr.RegisterOperator("upper", &UpperOperator{})
+```
+
+<CodeGroup>
+```json JSON Logic
+{
+  "and": [
+    {">": [{"length": [{"var": "name"}]}, 5]},
+    {"==": [{"upper": [{"var": "status"}]}, "ACTIVE"]}
+  ]
+}
+```
+
+```sql SQL Output
+WHERE (LENGTH(name) > 5 AND UPPER(status) = 'ACTIVE')
+```
+</CodeGroup>
+
+## Dialect-aware custom operators
+
+Create operators that produce different SQL for each dialect:
+
+```go
+tr.RegisterDialectAwareOperatorFunc("now", func(op string, args []interface{}, dialect jsonlogic2sql.Dialect) (string, error) {
+    switch dialect {
+    case jsonlogic2sql.DialectBigQuery:
+        return "CURRENT_TIMESTAMP()", nil
+    case jsonlogic2sql.DialectSpanner:
+        return "CURRENT_TIMESTAMP()", nil
+    case jsonlogic2sql.DialectPostgreSQL:
+        return "NOW()", nil
+    default:
+        return "", fmt.Errorf("unsupported dialect: %s", dialect)
+    }
+})
+```
+
+<Tabs>
+  <Tab title="BigQuery">
+    ```sql
+    WHERE CURRENT_TIMESTAMP() = '2024-01-01'
+    ```
+  </Tab>
+  <Tab title="PostgreSQL">
+    ```sql
+    WHERE NOW() = '2024-01-01'
+    ```
+  </Tab>
+</Tabs>
+
+### Array length (dialect-specific)
+
+```go
+tr.RegisterDialectAwareOperatorFunc("array_length", func(op string, args []interface{}, dialect jsonlogic2sql.Dialect) (string, error) {
+    switch dialect {
+    case jsonlogic2sql.DialectBigQuery:
+        return fmt.Sprintf("ARRAY_LENGTH(%s)", args[0]), nil
+    case jsonlogic2sql.DialectSpanner:
+        return fmt.Sprintf("ARRAY_LENGTH(%s)", args[0]), nil
+    case jsonlogic2sql.DialectPostgreSQL:
+        return fmt.Sprintf("array_length(%s, 1)", args[0]), nil
+    default:
+        return "", fmt.Errorf("unsupported dialect: %s", dialect)
+    }
+})
+```
+
+<CodeGroup>
+```json JSON Logic
+{">": [{"array_length": [{"var": "items"}]}, 0]}
+```
+
+```sql BigQuery/Spanner
+WHERE ARRAY_LENGTH(items) > 0
+```
+
+```sql PostgreSQL
+WHERE array_length(items, 1) > 0
+```
+</CodeGroup>
+
+## Managing custom operators
+
+### Check if operator exists
+
+```go
+if tr.HasCustomOperator("length") {
+    fmt.Println("Length operator is registered")
+}
+```
+
+### List all custom operators
+
+```go
+operators := tr.ListCustomOperators()
+for _, op := range operators {
+    fmt.Println("Registered:", op)
+}
+```
+
+### Unregister an operator
+
+```go
+if tr.UnregisterOperator("length") {
+    fmt.Println("Successfully unregistered length operator")
+}
+```
+
+### Clear all custom operators
+
+```go
+tr.ClearCustomOperators()
+```
+
+## String matching operators
+
+Create custom LIKE operators:
+
+```go
+tr.RegisterOperatorFunc("startsWith", func(op string, args []interface{}) (string, error) {
+    if len(args) != 2 {
+        return "", fmt.Errorf("startsWith requires 2 arguments")
+    }
+    return fmt.Sprintf("%s LIKE '%s%%'", args[0], args[1]), nil
+})
+
+tr.RegisterOperatorFunc("endsWith", func(op string, args []interface{}) (string, error) {
+    if len(args) != 2 {
+        return "", fmt.Errorf("endsWith requires 2 arguments")
+    }
+    return fmt.Sprintf("%s LIKE '%%%s'", args[0], args[1]), nil
+})
+
+tr.RegisterOperatorFunc("contains", func(op string, args []interface{}) (string, error) {
+    if len(args) != 2 {
+        return "", fmt.Errorf("contains requires 2 arguments")
+    }
+    return fmt.Sprintf("%s LIKE '%%%s%%'", args[0], args[1]), nil
+})
+```
+
+## Custom operators with array operations
+
+### In array filters
+
+<CodeGroup>
+```json JSON Logic
+{
+  "all": [
+    {"var": "tags"},
+    {"!contains": [{"var": "item"}, "spam"]}
+  ]
+}
+```
+
+```sql SQL Output
+WHERE NOT EXISTS (SELECT 1 FROM UNNEST(tags) AS elem WHERE NOT (elem NOT LIKE '%spam%'))
+```
+</CodeGroup>
+
+### In map transformations
+
+<CodeGroup>
+```json JSON Logic
+{"map": [{"var": "names"}, {"toLower": [{"var": "item"}]}]}
+```
+
+```sql SQL Output
+WHERE ARRAY(SELECT LOWER(elem) FROM UNNEST(names) AS elem)
+```
+</CodeGroup>
+
+## Error handling
+
+Custom operators should validate inputs and return errors:
+
+```go
+tr.RegisterOperatorFunc("divide_safe", func(op string, args []interface{}) (string, error) {
+    if len(args) != 2 {
+        return "", fmt.Errorf("divide_safe requires exactly 2 arguments, got %d", len(args))
+    }
+    
+    // Return SQL that handles division by zero
+    return fmt.Sprintf("CASE WHEN %s = 0 THEN NULL ELSE %s / %s END", args[1], args[0], args[1]), nil
+})
+```
+
+## Restrictions
+
+You cannot override built-in operators:
+
+```go
+err := tr.RegisterOperatorFunc("and", func(op string, args []interface{}) (string, error) {
+    return "CUSTOM_AND", nil
+})
+// Returns error: cannot override built-in operator "and"
+```
+
+## Best practices
+
+1. **Validate argument count** - Always check that you received the expected number of arguments
+2. **Return descriptive errors** - Help users understand what went wrong
+3. **Consider dialects** - Use dialect-aware operators when SQL syntax varies
+4. **Test thoroughly** - Test custom operators with nested expressions and edge cases
+5. **Document behavior** - Clearly document what SQL each custom operator produces
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Schema validation" icon="shield-check" href="/examples/schema-validation">
+    Validate fields against a schema
+  </Card>
+  <Card title="Dialect-specific examples" icon="database" href="/examples/dialect-specific">
+    SQL differences across dialects
+  </Card>
+</CardGroup>

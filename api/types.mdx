@@ -1,0 +1,373 @@
+---
+title: Type definitions
+description: Core types, constants, and interfaces for transpiler configuration and customization
+---
+
+Core type definitions for configuring the transpiler, managing custom operators, and selecting SQL dialects.
+
+## Configuration types
+
+### TranspilerConfig
+
+```go
+type TranspilerConfig struct {
+    Dialect Dialect  // Required: target SQL dialect
+    Schema  *Schema  // Optional: schema for field validation
+}
+```
+
+Configuration options for creating a transpiler with [NewTranspilerWithConfig()](/api/functions#newtranspilerwithconfig).
+
+<ParamField path="Dialect" type="Dialect" required>
+  Target SQL dialect - must be one of the dialect constants
+</ParamField>
+
+<ParamField path="Schema" type="*Schema">
+  Optional schema for field validation and type checking. If `nil`, no validation is performed.
+</ParamField>
+
+**Example:**
+
+```go
+config := &jsonlogic2sql.TranspilerConfig{
+    Dialect: jsonlogic2sql.DialectBigQuery,
+    Schema:  mySchema, // Optional
+}
+transpiler, err := jsonlogic2sql.NewTranspilerWithConfig(config)
+```
+
+### Dialect
+
+```go
+type Dialect int
+```
+
+Represents a SQL dialect that the transpiler can target. Each dialect generates SQL syntax specific to that database system.
+
+**Constants:**
+
+<ParamField path="DialectBigQuery" type="Dialect">
+  Google BigQuery SQL syntax
+</ParamField>
+
+<ParamField path="DialectSpanner" type="Dialect">
+  Google Cloud Spanner SQL syntax
+</ParamField>
+
+<ParamField path="DialectPostgreSQL" type="Dialect">
+  PostgreSQL SQL syntax
+</ParamField>
+
+<ParamField path="DialectDuckDB" type="Dialect">
+  DuckDB SQL syntax
+</ParamField>
+
+<ParamField path="DialectClickHouse" type="Dialect">
+  ClickHouse SQL syntax
+</ParamField>
+
+**Methods:**
+
+```go
+func (d Dialect) String() string
+```
+
+Returns the human-readable name of the dialect (e.g., "BigQuery", "PostgreSQL").
+
+```go
+func (d Dialect) IsValid() bool
+```
+
+Returns `true` if the dialect is a valid, specified dialect.
+
+```go
+func (d Dialect) Validate() error
+```
+
+Returns an error if the dialect is not valid or unspecified.
+
+**Example:**
+
+```go
+dialect := jsonlogic2sql.DialectBigQuery
+fmt.Println(dialect.String())  // "BigQuery"
+fmt.Println(dialect.IsValid()) // true
+```
+
+## Custom operator types
+
+### OperatorFunc
+
+```go
+type OperatorFunc func(operator string, args []interface{}) (string, error)
+```
+
+Function type for simple custom operator implementations. The function receives the operator name and its arguments (already converted to SQL), and returns the SQL representation.
+
+<ParamField path="operator" type="string">
+  The operator name (e.g., "length", "contains")
+</ParamField>
+
+<ParamField path="args" type="[]interface{}">
+  Arguments already converted to SQL strings. Each element is a `string` representing the SQL for that argument.
+</ParamField>
+
+<ResponseField name="return" type="(string, error)">
+  SQL representation of the operation and any error encountered
+</ResponseField>
+
+**Example:**
+
+```go
+lengthFunc := func(operator string, args []interface{}) (string, error) {
+    if len(args) != 1 {
+        return "", fmt.Errorf("length requires exactly 1 argument")
+    }
+    return fmt.Sprintf("LENGTH(%s)", args[0]), nil
+}
+
+transpiler.RegisterOperatorFunc("length", lengthFunc)
+```
+
+### OperatorHandler
+
+```go
+type OperatorHandler interface {
+    ToSQL(operator string, args []interface{}) (string, error)
+}
+```
+
+Interface for custom operator implementations that need state or more complex logic.
+
+<ParamField path="ToSQL" type="method">
+  Converts the operator and its arguments to SQL. The `args` slice contains the SQL representations of each argument.
+</ParamField>
+
+**Example:**
+
+```go
+type PrefixOperator struct {
+    Prefix string
+}
+
+func (p *PrefixOperator) ToSQL(operator string, args []interface{}) (string, error) {
+    if len(args) != 1 {
+        return "", fmt.Errorf("%s requires exactly 1 argument", operator)
+    }
+    return fmt.Sprintf("%s_%s", p.Prefix, args[0]), nil
+}
+
+transpiler.RegisterOperator("prefixed", &PrefixOperator{Prefix: "custom"})
+```
+
+### DialectAwareOperatorFunc
+
+```go
+type DialectAwareOperatorFunc func(operator string, args []interface{}, dialect Dialect) (string, error)
+```
+
+Function type for dialect-aware custom operator implementations. Use this when your operator needs to generate different SQL for different dialects.
+
+<ParamField path="operator" type="string">
+  The operator name
+</ParamField>
+
+<ParamField path="args" type="[]interface{}">
+  Arguments already converted to SQL strings
+</ParamField>
+
+<ParamField path="dialect" type="Dialect">
+  The target SQL dialect
+</ParamField>
+
+<ResponseField name="return" type="(string, error)">
+  SQL representation for the specified dialect and any error encountered
+</ResponseField>
+
+**Example:**
+
+```go
+nowFunc := func(operator string, args []interface{}, dialect jsonlogic2sql.Dialect) (string, error) {
+    switch dialect {
+    case jsonlogic2sql.DialectBigQuery, jsonlogic2sql.DialectSpanner:
+        return "CURRENT_TIMESTAMP()", nil
+    case jsonlogic2sql.DialectPostgreSQL:
+        return "CURRENT_TIMESTAMP", nil
+    case jsonlogic2sql.DialectDuckDB:
+        return "CURRENT_TIMESTAMP", nil
+    default:
+        return "", fmt.Errorf("unsupported dialect: %s", dialect)
+    }
+}
+
+transpiler.RegisterDialectAwareOperatorFunc("now", nowFunc)
+```
+
+### DialectAwareOperatorHandler
+
+```go
+type DialectAwareOperatorHandler interface {
+    ToSQLWithDialect(operator string, args []interface{}, dialect Dialect) (string, error)
+}
+```
+
+Interface for dialect-aware custom operator implementations that need state.
+
+<ParamField path="ToSQLWithDialect" type="method">
+  Converts the operator and its arguments to SQL for the specified dialect. The `args` slice contains the SQL representations of each argument.
+</ParamField>
+
+**Example:**
+
+```go
+type DateFormatOperator struct {
+    DefaultFormat string
+}
+
+func (d *DateFormatOperator) ToSQLWithDialect(op string, args []interface{}, dialect jsonlogic2sql.Dialect) (string, error) {
+    if len(args) < 1 {
+        return "", fmt.Errorf("date_format requires at least 1 argument")
+    }
+    
+    format := d.DefaultFormat
+    if len(args) > 1 {
+        format = args[1].(string)
+    }
+    
+    switch dialect {
+    case jsonlogic2sql.DialectBigQuery:
+        return fmt.Sprintf("FORMAT_TIMESTAMP('%s', %s)", format, args[0]), nil
+    case jsonlogic2sql.DialectPostgreSQL:
+        return fmt.Sprintf("TO_CHAR(%s, '%s')", args[0], format), nil
+    default:
+        return "", fmt.Errorf("unsupported dialect: %s", dialect)
+    }
+}
+```
+
+### OperatorRegistry
+
+```go
+type OperatorRegistry struct {
+    // Private fields - use methods to interact
+}
+```
+
+Thread-safe registry for managing custom operators. Typically used internally by transpiler instances.
+
+**Methods:**
+
+```go
+func (r *OperatorRegistry) Register(operatorName string, handler OperatorHandler)
+```
+
+Adds a custom operator handler to the registry. If an operator with the same name exists, it will be replaced.
+
+```go
+func (r *OperatorRegistry) RegisterFunc(operatorName string, fn OperatorFunc)
+```
+
+Adds a custom operator function to the registry. Convenience method for simple operators.
+
+```go
+func (r *OperatorRegistry) RegisterDialectAwareFunc(operatorName string, fn DialectAwareOperatorFunc)
+```
+
+Adds a dialect-aware custom operator function to the registry.
+
+```go
+func (r *OperatorRegistry) Unregister(operatorName string) bool
+```
+
+Removes a custom operator from the registry. Returns `true` if found and removed.
+
+```go
+func (r *OperatorRegistry) Get(operatorName string) (OperatorHandler, bool)
+```
+
+Retrieves a custom operator handler. Returns the handler and `true` if found.
+
+```go
+func (r *OperatorRegistry) Has(operatorName string) bool
+```
+
+Checks if an operator is registered.
+
+```go
+func (r *OperatorRegistry) List() []string
+```
+
+Returns a slice of all registered operator names.
+
+```go
+func (r *OperatorRegistry) Clear()
+```
+
+Removes all registered operators.
+
+```go
+func (r *OperatorRegistry) Clone() *OperatorRegistry
+```
+
+Creates a copy of the registry with all registered operators.
+
+```go
+func (r *OperatorRegistry) Merge(other *OperatorRegistry)
+```
+
+Adds all operators from another registry to this one. Existing operators with the same name will be replaced.
+
+**Example:**
+
+```go
+registry := jsonlogic2sql.NewOperatorRegistry()
+registry.RegisterFunc("length", lengthFunc)
+registry.RegisterFunc("uppercase", uppercaseFunc)
+
+fmt.Println(registry.List())        // ["length", "uppercase"]
+fmt.Println(registry.Has("length")) // true
+
+registry.Unregister("length")
+fmt.Println(registry.List())        // ["uppercase"]
+```
+
+## Built-in operators
+
+The following operators are built-in and **cannot** be overridden by custom operators:
+
+### Data access
+- `var` - Variable access
+- `missing` - Check for missing fields
+- `missing_some` - Check if some fields are missing
+
+### Logical and boolean
+- `if` - Conditional expressions
+- `==`, `===` - Equality
+- `!=`, `!==` - Inequality
+- `and` - Logical AND
+- `or` - Logical OR
+- `!` - Logical NOT
+- `!!` - Boolean conversion
+
+### Numeric
+- `>`, `>=`, `<`, `<=` - Comparisons
+- `+`, `-`, `*`, `/`, `%` - Arithmetic
+- `max`, `min` - Maximum/minimum
+
+### String and array
+- `cat` - String concatenation
+- `substr` - Substring
+- `in` - Array/string membership
+- `map` - Array mapping
+- `filter` - Array filtering
+- `reduce` - Array reduction
+- `all` - All elements match
+- `some` - Any element matches
+- `none` - No elements match
+- `merge` - Array concatenation
+
+## See also
+
+- [Transpiler methods](/api/transpiler) - Using types with transpiler instances
+- [Schema types](/api/schema) - Schema-related type definitions
+- [Error types](/api/errors) - Error handling type definitions

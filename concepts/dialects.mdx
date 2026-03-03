@@ -1,0 +1,313 @@
+---
+title: SQL dialects
+description: How jsonlogic2sql generates database-specific SQL for different SQL engines
+---
+
+jsonlogic2sql transpiles JSON Logic to SQL that works natively with your target database. Each dialect generates syntactically correct SQL using database-specific functions and features.
+
+## Supported dialects
+
+The library supports five production-ready SQL dialects:
+
+<CardGroup cols={2}>
+  <Card title="Google BigQuery" icon="google">
+    Cloud-native data warehouse with columnar storage
+  </Card>
+  <Card title="Google Cloud Spanner" icon="google">
+    Globally distributed relational database
+  </Card>
+  <Card title="PostgreSQL" icon="elephant">
+    Advanced open-source relational database
+  </Card>
+  <Card title="DuckDB" icon="duck">
+    In-process analytical database
+  </Card>
+  <Card title="ClickHouse" icon="gauge-high">
+    Column-oriented database for analytics
+  </Card>
+</CardGroup>
+
+## Dialect constants
+
+When creating a transpiler, use these dialect constants:
+
+```go
+import "github.com/h22rana/jsonlogic2sql"
+
+// Available dialect constants
+jsonlogic2sql.DialectBigQuery
+jsonlogic2sql.DialectSpanner
+jsonlogic2sql.DialectPostgreSQL
+jsonlogic2sql.DialectDuckDB
+jsonlogic2sql.DialectClickHouse
+```
+
+### Usage example
+
+<Tabs>
+  <Tab title="BigQuery">
+    ```go
+    transpiler, err := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery)
+    if err != nil {
+        log.Fatal(err)
+    }
+    
+    sql, err := transpiler.Transpile(`{"==": [{"var": "status"}, "active"]}`)
+    // WHERE status = 'active'
+    ```
+  </Tab>
+  <Tab title="PostgreSQL">
+    ```go
+    transpiler, err := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectPostgreSQL)
+    if err != nil {
+        log.Fatal(err)
+    }
+    
+    sql, err := transpiler.Transpile(`{"in": [{"var": "value"}, {"var": "items"}]}`)
+    // WHERE value = ANY(items)
+    ```
+  </Tab>
+</Tabs>
+
+## Dialect-specific SQL generation
+
+Most operators generate identical SQL across dialects. However, certain operations use database-specific syntax for optimal performance.
+
+### Array operations
+
+Array handling varies significantly between SQL dialects:
+
+<Accordion title="Array membership (in operator with array field)">
+  <Tabs>
+    <Tab title="BigQuery/Spanner">
+      ```sql
+      WHERE value IN UNNEST(array)
+      ```
+    </Tab>
+    <Tab title="PostgreSQL">
+      ```sql
+      WHERE value = ANY(array)
+      ```
+    </Tab>
+    <Tab title="DuckDB">
+      ```sql
+      WHERE list_contains(array, value)
+      ```
+    </Tab>
+    <Tab title="ClickHouse">
+      ```sql
+      WHERE has(array, value)
+      ```
+    </Tab>
+  </Tabs>
+</Accordion>
+
+<Accordion title="Array concatenation (merge operator)">
+  <Tabs>
+    <Tab title="BigQuery/Spanner/DuckDB">
+      ```sql
+      WHERE ARRAY_CONCAT(array1, array2)
+      ```
+    </Tab>
+    <Tab title="PostgreSQL">
+      ```sql
+      WHERE (array1 || array2)
+      ```
+    </Tab>
+    <Tab title="ClickHouse">
+      ```sql
+      WHERE arrayConcat(array1, array2)
+      ```
+    </Tab>
+  </Tabs>
+</Accordion>
+
+<Accordion title="Array map transformation">
+  <Tabs>
+    <Tab title="BigQuery/Spanner/PostgreSQL/DuckDB">
+      ```sql
+      WHERE ARRAY(SELECT (elem + 1) FROM UNNEST(numbers) AS elem)
+      ```
+    </Tab>
+    <Tab title="ClickHouse">
+      ```sql
+      WHERE arrayMap(elem -> (elem + 1), numbers)
+      ```
+    </Tab>
+  </Tabs>
+</Accordion>
+
+<Accordion title="Array filter">
+  <Tabs>
+    <Tab title="Standard SQL">
+      ```sql
+      WHERE ARRAY(SELECT elem FROM UNNEST(scores) AS elem WHERE elem > 70)
+      ```
+    </Tab>
+    <Tab title="ClickHouse">
+      ```sql
+      WHERE arrayFilter(elem -> elem > 70, scores)
+      ```
+    </Tab>
+  </Tabs>
+</Accordion>
+
+### String operations
+
+<Accordion title="String position (in operator with strings)">
+  <Tabs>
+    <Tab title="BigQuery/Spanner/DuckDB">
+      ```sql
+      WHERE STRPOS(haystack, needle) > 0
+      ```
+    </Tab>
+    <Tab title="PostgreSQL">
+      ```sql
+      WHERE POSITION(needle IN haystack) > 0
+      ```
+    </Tab>
+    <Tab title="ClickHouse">
+      ```sql
+      WHERE position(haystack, needle) > 0
+      ```
+    </Tab>
+  </Tabs>
+</Accordion>
+
+<Accordion title="Substring extraction">
+  <Tabs>
+    <Tab title="BigQuery/Spanner/PostgreSQL/DuckDB">
+      ```sql
+      WHERE SUBSTR(email, 1, 10)
+      ```
+    </Tab>
+    <Tab title="ClickHouse">
+      ```sql
+      WHERE substring(email, 1, 10)
+      ```
+    </Tab>
+  </Tabs>
+</Accordion>
+
+### SQL function reference
+
+Complete mapping of functions across dialects:
+
+| Function | BigQuery | Spanner | PostgreSQL | DuckDB | ClickHouse |
+|----------|----------|---------|------------|--------|------------|
+| String position | `STRPOS()` | `STRPOS()` | `POSITION()` | `STRPOS()` | `position()` |
+| String concat | `CONCAT()` | `CONCAT()` | `CONCAT()` | `CONCAT()` | `concat()` |
+| Substring | `SUBSTR()` | `SUBSTR()` | `SUBSTR()` | `SUBSTR()` | `substring()` |
+| Array map | UNNEST subquery | UNNEST subquery | UNNEST subquery | UNNEST subquery | `arrayMap()` |
+| Array filter | UNNEST subquery | UNNEST subquery | UNNEST subquery | UNNEST subquery | `arrayFilter()` |
+| Array concat | `ARRAY_CONCAT()` | `ARRAY_CONCAT()` | `\|\|` | `ARRAY_CONCAT()` | `arrayConcat()` |
+| Array membership | `IN UNNEST()` | `IN UNNEST()` | `= ANY()` | `list_contains()` | `has()` |
+| Max of values | `GREATEST()` | `GREATEST()` | `GREATEST()` | `GREATEST()` | `greatest()` |
+| Min of values | `LEAST()` | `LEAST()` | `LEAST()` | `LEAST()` | `least()` |
+| Null coalesce | `COALESCE()` | `COALESCE()` | `COALESCE()` | `COALESCE()` | `coalesce()` |
+
+## Operator compatibility
+
+All JSON Logic operators work across all supported dialects. The transpiler automatically generates the appropriate SQL syntax for your target database.
+
+<Accordion title="Data access operators">
+  ✓ `var` — Access variables  
+  ✓ `missing` — Check for null values  
+  ✓ `missing_some` — Check if some values are null
+</Accordion>
+
+<Accordion title="Comparison operators">
+  ✓ `==`, `===` — Equality  
+  ✓ `!=`, `!==` — Inequality  
+  ✓ `>`, `>=`, `<`, `<=` — Ordering comparisons  
+  ✓ `in` — Array/string membership
+</Accordion>
+
+<Accordion title="Logical operators">
+  ✓ `and` — Logical AND  
+  ✓ `or` — Logical OR  
+  ✓ `!` — Logical NOT  
+  ✓ `!!` — Boolean conversion  
+  ✓ `if` — Conditional expressions
+</Accordion>
+
+<Accordion title="Numeric operators">
+  ✓ `+`, `-`, `*`, `/`, `%` — Arithmetic  
+  ✓ `max`, `min` — Min/max values
+</Accordion>
+
+<Accordion title="Array operators">
+  ✓ `map` — Transform elements  
+  ✓ `filter` — Filter by condition  
+  ✓ `reduce` — Aggregate values  
+  ✓ `all`, `some`, `none` — Quantified checks  
+  ✓ `merge` — Concatenate arrays
+</Accordion>
+
+<Accordion title="String operators">
+  ✓ `cat` — Concatenate strings  
+  ✓ `substr` — Extract substring  
+  ✓ `in` — String containment
+</Accordion>
+
+## Why MySQL is not supported
+
+MySQL lacks native support for the `UNNEST()` function required for array operations. While workarounds exist using `JSON_TABLE()`, they produce semantically different behavior and significantly increase complexity.
+
+The library prioritizes correctness and performance over broad compatibility. If you need MySQL support, consider:
+
+1. Using a supported dialect with similar features (PostgreSQL)
+2. Implementing custom operators that avoid array operations
+3. Preprocessing JSON Logic to remove array operators before transpilation
+
+## Custom dialect-aware operators
+
+You can register custom operators that generate different SQL for each dialect:
+
+```go
+transpiler.RegisterDialectAwareOperatorFunc("currentTime",
+    func(op string, args []interface{}, dialect jsonlogic2sql.Dialect) (string, error) {
+        switch dialect {
+        case jsonlogic2sql.DialectBigQuery:
+            return "CURRENT_TIMESTAMP()", nil
+        case jsonlogic2sql.DialectClickHouse:
+            return "now()", nil
+        case jsonlogic2sql.DialectPostgreSQL:
+            return "NOW()", nil
+        default:
+            return "CURRENT_TIMESTAMP", nil
+        }
+    })
+```
+
+This allows you to extend the library while maintaining cross-dialect compatibility.
+
+## Choosing a dialect
+
+Select your dialect based on your database:
+
+<CardGroup cols={2}>
+  <Card title="Cloud analytics" icon="cloud">
+    Use **BigQuery** for Google Cloud data warehousing or **ClickHouse** for self-hosted analytics
+  </Card>
+  <Card title="Transactional workloads" icon="database">
+    Use **PostgreSQL** for general-purpose OLTP or **Spanner** for global distribution
+  </Card>
+  <Card title="Embedded/local" icon="microchip">
+    Use **DuckDB** for in-process analytics and data science workflows
+  </Card>
+  <Card title="Testing" icon="vial">
+    **DuckDB** offers the fastest setup for development and testing
+  </Card>
+</CardGroup>
+
+## See also
+
+<CardGroup cols={2}>
+  <Card title="Operators" icon="function" href="/concepts/operators">
+    Complete operator reference
+  </Card>
+  <Card title="Transpilation" icon="arrows-rotate" href="/concepts/transpilation">
+    How JSON Logic becomes SQL
+  </Card>
+</CardGroup>

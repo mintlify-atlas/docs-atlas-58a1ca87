@@ -1,0 +1,440 @@
+---
+title: Operator registry
+description: Advanced management of custom operators using the OperatorRegistry
+---
+
+The `OperatorRegistry` provides a thread-safe, centralized system for managing custom operators. It offers advanced features like cloning, merging, and listing operators, making it ideal for complex applications.
+
+## Registry basics
+
+Each `Transpiler` instance has an internal `OperatorRegistry` that manages custom operators. You typically interact with it through transpiler methods, but you can also create standalone registries.
+
+### Creating a registry
+
+```go operator.go:123-128
+registry := jsonlogic2sql.NewOperatorRegistry()
+```
+
+The registry is thread-safe and can be used concurrently from multiple goroutines.
+
+<Info>
+The `OperatorRegistry` uses a `sync.RWMutex` internally (operator.go:118-121) to ensure thread safety.
+</Info>
+
+## Registering operators
+
+### Register a handler
+
+```go operator.go:130-141
+type LengthOperator struct{}
+
+func (l *LengthOperator) ToSQL(operator string, args []interface{}) (string, error) {
+    if len(args) != 1 {
+        return "", fmt.Errorf("length requires exactly 1 argument")
+    }
+    return fmt.Sprintf("LENGTH(%s)", args[0]), nil
+}
+
+registry := jsonlogic2sql.NewOperatorRegistry()
+registry.Register("length", &LengthOperator{})
+```
+
+### Register a function
+
+For simple operators without state:
+
+```go operator.go:143-154
+registry := jsonlogic2sql.NewOperatorRegistry()
+registry.RegisterFunc("upper", func(op string, args []interface{}) (string, error) {
+    if len(args) != 1 {
+        return "", fmt.Errorf("upper requires exactly 1 argument")
+    }
+    return fmt.Sprintf("UPPER(%s)", args[0]), nil
+})
+```
+
+### Register a dialect-aware function
+
+```go operator.go:156-167
+registry.RegisterDialectAwareFunc("now", 
+    func(op string, args []interface{}, dialect jsonlogic2sql.Dialect) (string, error) {
+        switch dialect {
+        case jsonlogic2sql.DialectBigQuery:
+            return "CURRENT_TIMESTAMP()", nil
+        case jsonlogic2sql.DialectPostgreSQL:
+            return "NOW()", nil
+        default:
+            return "", fmt.Errorf("unsupported dialect: %s", dialect)
+        }
+    })
+```
+
+## Checking operators
+
+### Check if operator exists
+
+```go operator.go:190-196
+if registry.Has("length") {
+    fmt.Println("length operator is registered")
+}
+```
+
+### Get operator handler
+
+```go operator.go:181-188
+handler, ok := registry.Get("length")
+if !ok {
+    fmt.Println("Operator not found")
+    return
+}
+
+// Use the handler
+sql, err := handler.ToSQL("length", []interface{}{"email"})
+```
+
+### List all operators
+
+```go operator.go:198-207
+operators := registry.List()
+for _, name := range operators {
+    fmt.Printf("Registered operator: %s\n", name)
+}
+```
+
+## Managing operators
+
+### Unregister an operator
+
+```go operator.go:169-179
+removed := registry.Unregister("length")
+if removed {
+    fmt.Println("Operator removed")
+} else {
+    fmt.Println("Operator not found")
+}
+```
+
+### Clear all operators
+
+```go operator.go:209-214
+registry.Clear()
+// All operators are now removed
+```
+
+<Warning>
+Clearing the registry removes all custom operators. Built-in operators are not affected.
+</Warning>
+
+## Advanced features
+
+### Clone a registry
+
+Create an independent copy of a registry:
+
+```go operator.go:216-225
+original := jsonlogic2sql.NewOperatorRegistry()
+original.Register("length", &LengthOperator{})
+
+clone := original.Clone()
+
+// Modifications to clone don't affect original
+clone.Register("upper", &UpperOperator{})
+
+fmt.Println(clone.Has("upper"))    // true
+fmt.Println(original.Has("upper")) // false
+```
+
+**Use cases:**
+- Creating template registries
+- Testing operator combinations
+- Isolating operator sets per tenant
+
+### Merge registries
+
+Combine operators from multiple registries:
+
+```go operator.go:227-235
+registry1 := jsonlogic2sql.NewOperatorRegistry()
+registry1.Register("length", &LengthOperator{})
+
+registry2 := jsonlogic2sql.NewOperatorRegistry()
+registry2.Register("upper", &UpperOperator{})
+
+registry1.Merge(registry2)
+// registry1 now has both 'length' and 'upper'
+```
+
+<Info>
+If operators with the same name exist in both registries, the operator from the merged registry replaces the existing one (operator.go:229-234).
+</Info>
+
+**Use cases:**
+- Combining common and application-specific operators
+- Loading operators from plugins
+- Building operator libraries
+
+## Real-world patterns
+
+### Pattern 1: Shared operator library
+
+Create a shared registry for common operators:
+
+```go
+// common/operators.go
+func CreateCommonRegistry() *jsonlogic2sql.OperatorRegistry {
+    registry := jsonlogic2sql.NewOperatorRegistry()
+    
+    registry.RegisterFunc("length", func(op string, args []interface{}) (string, error) {
+        return fmt.Sprintf("LENGTH(%s)", args[0]), nil
+    })
+    
+    registry.RegisterFunc("upper", func(op string, args []interface{}) (string, error) {
+        return fmt.Sprintf("UPPER(%s)", args[0]), nil
+    })
+    
+    registry.RegisterFunc("lower", func(op string, args []interface{}) (string, error) {
+        return fmt.Sprintf("LOWER(%s)", args[0]), nil
+    })
+    
+    return registry
+}
+
+// app/handlers.go
+func NewTranspilerWithCommonOps(dialect jsonlogic2sql.Dialect) (*jsonlogic2sql.Transpiler, error) {
+    tr, err := jsonlogic2sql.NewTranspiler(dialect)
+    if err != nil {
+        return nil, err
+    }
+    
+    // Get operators from shared registry
+    commonRegistry := CreateCommonRegistry()
+    for _, name := range commonRegistry.List() {
+        handler, _ := commonRegistry.Get(name)
+        tr.RegisterOperator(name, handler)
+    }
+    
+    return tr, nil
+}
+```
+
+### Pattern 2: Multi-tenant isolation
+
+Different operator sets per tenant:
+
+```go
+type TenantTranspilerFactory struct {
+    baseRegistry *jsonlogic2sql.OperatorRegistry
+    tenantCustomOps map[string]*jsonlogic2sql.OperatorRegistry
+}
+
+func (f *TenantTranspilerFactory) GetTranspiler(
+    tenantID string, 
+    dialect jsonlogic2sql.Dialect,
+) (*jsonlogic2sql.Transpiler, error) {
+    tr, err := jsonlogic2sql.NewTranspiler(dialect)
+    if err != nil {
+        return nil, err
+    }
+    
+    // Start with base operators
+    registry := f.baseRegistry.Clone()
+    
+    // Add tenant-specific operators if any
+    if tenantOps, exists := f.tenantCustomOps[tenantID]; exists {
+        registry.Merge(tenantOps)
+    }
+    
+    // Register all operators
+    for _, name := range registry.List() {
+        handler, _ := registry.Get(name)
+        tr.RegisterOperator(name, handler)
+    }
+    
+    return tr, nil
+}
+```
+
+### Pattern 3: Stateful operators
+
+Operators that maintain state or configuration:
+
+```go operator_test.go:28-42
+type ConcatWithSeparatorOperator struct {
+    Separator string
+}
+
+func (c *ConcatWithSeparatorOperator) ToSQL(operator string, args []interface{}) (string, error) {
+    if len(args) < 2 {
+        return "", fmt.Errorf("concat_ws requires at least 2 arguments")
+    }
+    result := fmt.Sprintf("%s", args[0])
+    for i := 1; i < len(args); i++ {
+        result += fmt.Sprintf(" || '%s' || %s", c.Separator, args[i])
+    }
+    return result, nil
+}
+
+registry := jsonlogic2sql.NewOperatorRegistry()
+registry.Register("concat_ws", &ConcatWithSeparatorOperator{Separator: ", "})
+```
+
+## Testing operator registries
+
+### Test registration and retrieval
+
+```go operator_test.go:44-75
+func TestOperatorRegistry(t *testing.T) {
+    t.Run("Register and Get", func(t *testing.T) {
+        registry := NewOperatorRegistry()
+        registry.Register("length", &LengthOperator{})
+
+        handler, ok := registry.Get("length")
+        if !ok {
+            t.Fatal("expected to find length operator")
+        }
+        if handler == nil {
+            t.Fatal("expected non-nil handler")
+        }
+    })
+
+    t.Run("RegisterFunc", func(t *testing.T) {
+        registry := NewOperatorRegistry()
+        registry.RegisterFunc("custom", func(op string, args []interface{}) (string, error) {
+            return "CUSTOM()", nil
+        })
+
+        handler, ok := registry.Get("custom")
+        if !ok {
+            t.Fatal("expected to find custom operator")
+        }
+        result, err := handler.ToSQL("custom", nil)
+        if err != nil {
+            t.Fatalf("unexpected error: %v", err)
+        }
+        if result != "CUSTOM()" {
+            t.Errorf("expected CUSTOM(), got %s", result)
+        }
+    })
+}
+```
+
+### Test clone independence
+
+```go operator_test.go:126-140
+t.Run("Clone", func(t *testing.T) {
+    registry := NewOperatorRegistry()
+    registry.Register("length", &LengthOperator{})
+
+    clone := registry.Clone()
+    if !clone.Has("length") {
+        t.Error("expected clone to have length operator")
+    }
+
+    // Modify original, clone should not be affected
+    registry.Register("upper", &UpperOperator{})
+    if clone.Has("upper") {
+        t.Error("clone should not be affected by changes to original")
+    }
+})
+```
+
+### Test merge behavior
+
+```go operator_test.go:142-156
+t.Run("Merge", func(t *testing.T) {
+    registry1 := NewOperatorRegistry()
+    registry1.Register("length", &LengthOperator{})
+
+    registry2 := NewOperatorRegistry()
+    registry2.Register("upper", &UpperOperator{})
+
+    registry1.Merge(registry2)
+    if !registry1.Has("length") {
+        t.Error("expected registry1 to still have length")
+    }
+    if !registry1.Has("upper") {
+        t.Error("expected registry1 to have upper after merge")
+    }
+})
+```
+
+## Operator validation
+
+The registry validates operator names to prevent conflicts with built-in operators:
+
+```go operator.go:237-261
+func validateOperatorName(name string) error {
+    builtInOperators := map[string]bool{
+        // Data access
+        "var": true, "missing": true, "missing_some": true,
+        // Logical and Boolean
+        "if": true, "==": true, "===": true, "!=": true, "!==": true,
+        "and": true, "or": true, "!": true, "!!": true,
+        // Numeric
+        ">": true, ">=": true, "<": true, "<=": true,
+        "+": true, "-": true, "*": true, "/": true, "%": true,
+        "max": true, "min": true,
+        // String and Array
+        "cat": true, "substr": true,
+        "in":  true,
+        "map": true, "filter": true, "reduce": true,
+        "all": true, "some": true, "none": true, "merge": true,
+    }
+
+    if builtInOperators[name] {
+        return fmt.Errorf("cannot override built-in operator: %s", name)
+    }
+    return nil
+}
+```
+
+<Warning>
+You cannot override built-in operators. Attempting to register a custom operator with a built-in name will return an error.
+</Warning>
+
+## Thread safety
+
+The registry is safe for concurrent use:
+
+```go
+registry := jsonlogic2sql.NewOperatorRegistry()
+
+// Safe to call from multiple goroutines
+go registry.Register("op1", handler1)
+go registry.Register("op2", handler2)
+go registry.Get("op1")
+go registry.List()
+```
+
+All registry methods use read/write locks appropriately (operator.go:118-121):
+
+- `Get`, `Has`, `List` use read locks (allow multiple concurrent readers)
+- `Register`, `Unregister`, `Clear` use write locks (exclusive access)
+
+## Best practices
+
+<AccordionGroup>
+
+<Accordion title="Separate common and app-specific operators">
+Maintain a base registry for common operators and merge in application-specific ones as needed.
+</Accordion>
+
+<Accordion title="Use Clone for template registries">
+Create a base registry with common operators, then clone it for each transpiler instance to avoid shared state.
+</Accordion>
+
+<Accordion title="Test registry isolation">
+Ensure that cloning and merging work correctly and registries don't share unexpected state.
+</Accordion>
+
+<Accordion title="Document operator contracts">
+Clearly document what each operator expects in terms of argument count and types.
+</Accordion>
+
+</AccordionGroup>
+
+## See also
+
+- [Dialect-aware operators](/advanced/dialect-aware-operators) - Creating dialect-specific operators
+- [Custom operators](/customization/custom-operators) - Basic custom operator usage
+- [Performance](/advanced/performance) - Optimizing operator performance

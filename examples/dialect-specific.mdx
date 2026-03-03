@@ -1,0 +1,704 @@
+---
+title: Dialect-specific examples
+description: SQL output differences across BigQuery, PostgreSQL, Spanner, DuckDB, and ClickHouse
+---
+
+Different SQL dialects have unique syntax for certain operations. This guide shows real examples of how jsonlogic2sql adapts to each dialect.
+
+## Supported dialects
+
+jsonlogic2sql supports five SQL dialects:
+
+- **BigQuery** - Google BigQuery
+- **Spanner** - Google Cloud Spanner
+- **PostgreSQL** - PostgreSQL database
+- **DuckDB** - DuckDB analytics database
+- **ClickHouse** - ClickHouse OLAP database
+
+```go
+import "github.com/h22rana/jsonlogic2sql"
+
+// Create transpiler for specific dialect
+tr, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery)
+tr, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectPostgreSQL)
+tr, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectSpanner)
+tr, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectDuckDB)
+tr, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectClickHouse)
+```
+
+## Array operations
+
+### Map transformation
+
+<Tabs>
+  <Tab title="BigQuery">
+    <CodeGroup>
+    ```json JSON Logic
+    {"map": [{"var": "numbers"}, {"*": [{"var": "item"}, 2]}]}
+    ```
+    
+    ```sql SQL Output
+    WHERE ARRAY(SELECT (elem * 2) FROM UNNEST(numbers) AS elem)
+    ```
+    </CodeGroup>
+  </Tab>
+  <Tab title="Spanner">
+    <CodeGroup>
+    ```json JSON Logic
+    {"map": [{"var": "numbers"}, {"*": [{"var": "item"}, 2]}]}
+    ```
+    
+    ```sql SQL Output
+    WHERE ARRAY(SELECT (elem * 2) FROM UNNEST(numbers) AS elem)
+    ```
+    </CodeGroup>
+  </Tab>
+  <Tab title="PostgreSQL">
+    <CodeGroup>
+    ```json JSON Logic
+    {"map": [{"var": "numbers"}, {"*": [{"var": "item"}, 2]}]}
+    ```
+    
+    ```sql SQL Output
+    WHERE ARRAY(SELECT (elem * 2) FROM UNNEST(numbers) AS elem)
+    ```
+    </CodeGroup>
+  </Tab>
+  <Tab title="DuckDB">
+    <CodeGroup>
+    ```json JSON Logic
+    {"map": [{"var": "numbers"}, {"*": [{"var": "item"}, 2]}]}
+    ```
+    
+    ```sql SQL Output
+    WHERE ARRAY(SELECT (elem * 2) FROM UNNEST(numbers) AS elem)
+    ```
+    </CodeGroup>
+  </Tab>
+  <Tab title="ClickHouse">
+    <CodeGroup>
+    ```json JSON Logic
+    {"map": [{"var": "numbers"}, {"*": [{"var": "item"}, 2]}]}
+    ```
+    
+    ```sql SQL Output
+    WHERE arrayMap(elem -> (elem * 2), numbers)
+    ```
+    </CodeGroup>
+  </Tab>
+</Tabs>
+
+### Filter with condition
+
+<Tabs>
+  <Tab title="BigQuery">
+    <CodeGroup>
+    ```json JSON Logic
+    {"filter": [{"var": "scores"}, {">": [{"var": "item"}, 70]}]}
+    ```
+    
+    ```sql SQL Output
+    WHERE ARRAY(SELECT elem FROM UNNEST(scores) AS elem WHERE elem > 70)
+    ```
+    </CodeGroup>
+  </Tab>
+  <Tab title="Spanner">
+    <CodeGroup>
+    ```json JSON Logic
+    {"filter": [{"var": "scores"}, {">": [{"var": "item"}, 70]}]}
+    ```
+    
+    ```sql SQL Output
+    WHERE ARRAY(SELECT elem FROM UNNEST(scores) AS elem WHERE elem > 70)
+    ```
+    </CodeGroup>
+  </Tab>
+  <Tab title="PostgreSQL">
+    <CodeGroup>
+    ```json JSON Logic
+    {"filter": [{"var": "scores"}, {">": [{"var": "item"}, 70]}]}
+    ```
+    
+    ```sql SQL Output
+    WHERE ARRAY(SELECT elem FROM UNNEST(scores) AS elem WHERE elem > 70)
+    ```
+    </CodeGroup>
+  </Tab>
+  <Tab title="DuckDB">
+    <CodeGroup>
+    ```json JSON Logic
+    {"filter": [{"var": "scores"}, {">": [{"var": "item"}, 70]}]}
+    ```
+    
+    ```sql SQL Output
+    WHERE ARRAY(SELECT elem FROM UNNEST(scores) AS elem WHERE elem > 70)
+    ```
+    </CodeGroup>
+  </Tab>
+  <Tab title="ClickHouse">
+    <CodeGroup>
+    ```json JSON Logic
+    {"filter": [{"var": "scores"}, {">": [{"var": "item"}, 70]}]}
+    ```
+    
+    ```sql SQL Output
+    WHERE arrayFilter(elem -> elem > 70, scores)
+    ```
+    </CodeGroup>
+  </Tab>
+</Tabs>
+
+### All elements check
+
+<Tabs>
+  <Tab title="BigQuery">
+    <CodeGroup>
+    ```json JSON Logic
+    {"all": [{"var": "ages"}, {">=": [{"var": "item"}, 18]}]}
+    ```
+    
+    ```sql SQL Output
+    WHERE NOT EXISTS (SELECT 1 FROM UNNEST(ages) AS elem WHERE NOT (elem >= 18))
+    ```
+    </CodeGroup>
+  </Tab>
+  <Tab title="Spanner">
+    <CodeGroup>
+    ```json JSON Logic
+    {"all": [{"var": "ages"}, {">=": [{"var": "item"}, 18]}]}
+    ```
+    
+    ```sql SQL Output
+    WHERE NOT EXISTS (SELECT 1 FROM UNNEST(ages) AS elem WHERE NOT (elem >= 18))
+    ```
+    </CodeGroup>
+  </Tab>
+  <Tab title="PostgreSQL">
+    <CodeGroup>
+    ```json JSON Logic
+    {"all": [{"var": "ages"}, {">=": [{"var": "item"}, 18]}]}
+    ```
+    
+    ```sql SQL Output
+    WHERE NOT EXISTS (SELECT 1 FROM UNNEST(ages) AS elem WHERE NOT (elem >= 18))
+    ```
+    </CodeGroup>
+  </Tab>
+  <Tab title="DuckDB">
+    <CodeGroup>
+    ```json JSON Logic
+    {"all": [{"var": "ages"}, {">=": [{"var": "item"}, 18]}]}
+    ```
+    
+    ```sql SQL Output
+    WHERE NOT EXISTS (SELECT 1 FROM UNNEST(ages) AS elem WHERE NOT (elem >= 18))
+    ```
+    </CodeGroup>
+  </Tab>
+  <Tab title="ClickHouse">
+    <CodeGroup>
+    ```json JSON Logic
+    {"all": [{"var": "ages"}, {">=": [{"var": "item"}, 18]}]}
+    ```
+    
+    ```sql SQL Output
+    WHERE arrayAll(elem -> elem >= 18, ages)
+    ```
+    </CodeGroup>
+  </Tab>
+</Tabs>
+
+### Some elements check
+
+<Tabs>
+  <Tab title="BigQuery">
+    <CodeGroup>
+    ```json JSON Logic
+    {"some": [{"var": "items"}, {"==": [{"var": "item"}, "active"]}]}
+    ```
+    
+    ```sql SQL Output
+    WHERE EXISTS (SELECT 1 FROM UNNEST(items) AS elem WHERE elem = 'active')
+    ```
+    </CodeGroup>
+  </Tab>
+  <Tab title="Spanner">
+    <CodeGroup>
+    ```json JSON Logic
+    {"some": [{"var": "items"}, {"==": [{"var": "item"}, "active"]}]}
+    ```
+    
+    ```sql SQL Output
+    WHERE EXISTS (SELECT 1 FROM UNNEST(items) AS elem WHERE elem = 'active')
+    ```
+    </CodeGroup>
+  </Tab>
+  <Tab title="PostgreSQL">
+    <CodeGroup>
+    ```json JSON Logic
+    {"some": [{"var": "items"}, {"==": [{"var": "item"}, "active"]}]}
+    ```
+    
+    ```sql SQL Output
+    WHERE EXISTS (SELECT 1 FROM UNNEST(items) AS elem WHERE elem = 'active')
+    ```
+    </CodeGroup>
+  </Tab>
+  <Tab title="DuckDB">
+    <CodeGroup>
+    ```json JSON Logic
+    {"some": [{"var": "items"}, {"==": [{"var": "item"}, "active"]}]}
+    ```
+    
+    ```sql SQL Output
+    WHERE EXISTS (SELECT 1 FROM UNNEST(items) AS elem WHERE elem = 'active')
+    ```
+    </CodeGroup>
+  </Tab>
+  <Tab title="ClickHouse">
+    <CodeGroup>
+    ```json JSON Logic
+    {"some": [{"var": "items"}, {"==": [{"var": "item"}, "active"]}]}
+    ```
+    
+    ```sql SQL Output
+    WHERE arrayExists(elem -> elem = 'active', items)
+    ```
+    </CodeGroup>
+  </Tab>
+</Tabs>
+
+### None elements check
+
+<Tabs>
+  <Tab title="BigQuery">
+    <CodeGroup>
+    ```json JSON Logic
+    {"none": [{"var": "values"}, {"==": [{"var": "item"}, "error"]}]}
+    ```
+    
+    ```sql SQL Output
+    WHERE NOT EXISTS (SELECT 1 FROM UNNEST(values) AS elem WHERE elem = 'error')
+    ```
+    </CodeGroup>
+  </Tab>
+  <Tab title="ClickHouse">
+    <CodeGroup>
+    ```json JSON Logic
+    {"none": [{"var": "values"}, {"==": [{"var": "item"}, "error"]}]}
+    ```
+    
+    ```sql SQL Output
+    WHERE NOT arrayExists(elem -> elem = 'error', values)
+    ```
+    </CodeGroup>
+  </Tab>
+</Tabs>
+
+### Reduce (SUM pattern)
+
+<Tabs>
+  <Tab title="BigQuery">
+    <CodeGroup>
+    ```json JSON Logic
+    {
+      "reduce": [
+        {"var": "numbers"},
+        {"+": [{"var": "accumulator"}, {"var": "current"}]},
+        0
+      ]
+    }
+    ```
+    
+    ```sql SQL Output
+    WHERE 0 + COALESCE((SELECT SUM(elem) FROM UNNEST(numbers) AS elem), 0)
+    ```
+    </CodeGroup>
+  </Tab>
+  <Tab title="ClickHouse">
+    <CodeGroup>
+    ```json JSON Logic
+    {
+      "reduce": [
+        {"var": "numbers"},
+        {"+": [{"var": "accumulator"}, {"var": "current"}]},
+        0
+      ]
+    }
+    ```
+    
+    ```sql SQL Output
+    WHERE 0 + coalesce(arrayReduce('sum', numbers), 0)
+    ```
+    </CodeGroup>
+  </Tab>
+</Tabs>
+
+### Merge arrays
+
+<Tabs>
+  <Tab title="BigQuery">
+    <CodeGroup>
+    ```json JSON Logic
+    {"merge": [{"var": "arr1"}, {"var": "arr2"}]}
+    ```
+    
+    ```sql SQL Output
+    WHERE ARRAY_CONCAT(arr1, arr2)
+    ```
+    </CodeGroup>
+  </Tab>
+  <Tab title="Spanner">
+    <CodeGroup>
+    ```json JSON Logic
+    {"merge": [{"var": "arr1"}, {"var": "arr2"}]}
+    ```
+    
+    ```sql SQL Output
+    WHERE ARRAY_CONCAT(arr1, arr2)
+    ```
+    </CodeGroup>
+  </Tab>
+  <Tab title="PostgreSQL">
+    <CodeGroup>
+    ```json JSON Logic
+    {"merge": [{"var": "arr1"}, {"var": "arr2"}]}
+    ```
+    
+    ```sql SQL Output
+    WHERE (arr1 || arr2)
+    ```
+    </CodeGroup>
+  </Tab>
+  <Tab title="DuckDB">
+    <CodeGroup>
+    ```json JSON Logic
+    {"merge": [{"var": "arr1"}, {"var": "arr2"}]}
+    ```
+    
+    ```sql SQL Output
+    WHERE ARRAY_CONCAT(arr1, arr2)
+    ```
+    </CodeGroup>
+  </Tab>
+  <Tab title="ClickHouse">
+    <CodeGroup>
+    ```json JSON Logic
+    {"merge": [{"var": "arr1"}, {"var": "arr2"}]}
+    ```
+    
+    ```sql SQL Output
+    WHERE arrayConcat(arr1, arr2)
+    ```
+    </CodeGroup>
+  </Tab>
+</Tabs>
+
+## IN operator with array fields
+
+When checking if a value is in an array field (requires schema):
+
+<Tabs>
+  <Tab title="BigQuery">
+    <CodeGroup>
+    ```json JSON Logic
+    {"in": ["vip", {"var": "tags"}]}
+    ```
+    
+    ```sql SQL Output
+    WHERE 'vip' IN UNNEST(tags)
+    ```
+    </CodeGroup>
+  </Tab>
+  <Tab title="Spanner">
+    <CodeGroup>
+    ```json JSON Logic
+    {"in": ["vip", {"var": "tags"}]}
+    ```
+    
+    ```sql SQL Output
+    WHERE 'vip' IN UNNEST(tags)
+    ```
+    </CodeGroup>
+  </Tab>
+  <Tab title="PostgreSQL">
+    <CodeGroup>
+    ```json JSON Logic
+    {"in": ["vip", {"var": "tags"}]}
+    ```
+    
+    ```sql SQL Output
+    WHERE 'vip' = ANY(tags)
+    ```
+    </CodeGroup>
+  </Tab>
+  <Tab title="DuckDB">
+    <CodeGroup>
+    ```json JSON Logic
+    {"in": ["vip", {"var": "tags"}]}
+    ```
+    
+    ```sql SQL Output
+    WHERE list_contains(tags, 'vip')
+    ```
+    </CodeGroup>
+  </Tab>
+  <Tab title="ClickHouse">
+    <CodeGroup>
+    ```json JSON Logic
+    {"in": ["vip", {"var": "tags"}]}
+    ```
+    
+    ```sql SQL Output
+    WHERE has(tags, 'vip')
+    ```
+    </CodeGroup>
+  </Tab>
+</Tabs>
+
+## String operations
+
+### String containment
+
+<Tabs>
+  <Tab title="BigQuery">
+    <CodeGroup>
+    ```json JSON Logic
+    {"in": ["test", {"var": "description"}]}
+    ```
+    
+    ```sql SQL Output
+    WHERE STRPOS(description, 'test') > 0
+    ```
+    </CodeGroup>
+  </Tab>
+  <Tab title="Spanner">
+    <CodeGroup>
+    ```json JSON Logic
+    {"in": ["test", {"var": "description"}]}
+    ```
+    
+    ```sql SQL Output
+    WHERE STRPOS(description, 'test') > 0
+    ```
+    </CodeGroup>
+  </Tab>
+  <Tab title="PostgreSQL">
+    <CodeGroup>
+    ```json JSON Logic
+    {"in": ["test", {"var": "description"}]}
+    ```
+    
+    ```sql SQL Output
+    WHERE POSITION('test' IN description) > 0
+    ```
+    </CodeGroup>
+  </Tab>
+  <Tab title="DuckDB">
+    <CodeGroup>
+    ```json JSON Logic
+    {"in": ["test", {"var": "description"}]}
+    ```
+    
+    ```sql SQL Output
+    WHERE STRPOS(description, 'test') > 0
+    ```
+    </CodeGroup>
+  </Tab>
+  <Tab title="ClickHouse">
+    <CodeGroup>
+    ```json JSON Logic
+    {"in": ["test", {"var": "description"}]}
+    ```
+    
+    ```sql SQL Output
+    WHERE position(description, 'test') > 0
+    ```
+    </CodeGroup>
+  </Tab>
+</Tabs>
+
+### Substring
+
+<Tabs>
+  <Tab title="BigQuery">
+    <CodeGroup>
+    ```json JSON Logic
+    {"substr": [{"var": "text"}, 5, 10]}
+    ```
+    
+    ```sql SQL Output
+    WHERE SUBSTR(text, 6, 10)
+    ```
+    </CodeGroup>
+  </Tab>
+  <Tab title="Spanner">
+    <CodeGroup>
+    ```json JSON Logic
+    {"substr": [{"var": "text"}, 5, 10]}
+    ```
+    
+    ```sql SQL Output
+    WHERE SUBSTR(text, 6, 10)
+    ```
+    </CodeGroup>
+  </Tab>
+  <Tab title="PostgreSQL">
+    <CodeGroup>
+    ```json JSON Logic
+    {"substr": [{"var": "text"}, 5, 10]}
+    ```
+    
+    ```sql SQL Output
+    WHERE SUBSTR(text, 6, 10)
+    ```
+    </CodeGroup>
+  </Tab>
+  <Tab title="DuckDB">
+    <CodeGroup>
+    ```json JSON Logic
+    {"substr": [{"var": "text"}, 5, 10]}
+    ```
+    
+    ```sql SQL Output
+    WHERE SUBSTR(text, 6, 10)
+    ```
+    </CodeGroup>
+  </Tab>
+  <Tab title="ClickHouse">
+    <CodeGroup>
+    ```json JSON Logic
+    {"substr": [{"var": "text"}, 5, 10]}
+    ```
+    
+    ```sql SQL Output
+    WHERE substring(text, 6, 10)
+    ```
+    </CodeGroup>
+  </Tab>
+</Tabs>
+
+## Common operations (same across dialects)
+
+Many operations produce identical SQL across all dialects:
+
+### Comparisons
+
+```json
+{">": [{"var": "amount"}, 1000]}
+```
+
+All dialects produce:
+```sql
+WHERE amount > 1000
+```
+
+### Logical operators
+
+```json
+{
+  "and": [
+    {"==": [{"var": "status"}, "active"]},
+    {">": [{"var": "score"}, 100]}
+  ]
+}
+```
+
+All dialects produce:
+```sql
+WHERE (status = 'active' AND score > 100)
+```
+
+### NULL checks
+
+```json
+{"==": [{"var": "deleted_at"}, null]}
+```
+
+All dialects produce:
+```sql
+WHERE deleted_at IS NULL
+```
+
+### Arithmetic
+
+```json
+{"+": [{"var": "price"}, {"var": "tax"}]}
+```
+
+All dialects produce:
+```sql
+WHERE (price + tax)
+```
+
+### String concatenation
+
+```json
+{"cat": [{"var": "firstName"}, " ", {"var": "lastName"}]}
+```
+
+All dialects produce:
+```sql
+WHERE CONCAT(firstName, ' ', lastName)
+```
+
+### CASE statements
+
+```json
+{
+  "if": [
+    {">": [{"var": "age"}, 18]},
+    "adult",
+    "minor"
+  ]
+}
+```
+
+All dialects produce:
+```sql
+WHERE CASE WHEN age > 18 THEN 'adult' ELSE 'minor' END
+```
+
+## Choosing a dialect
+
+Select the dialect that matches your target database:
+
+```go
+import "github.com/h22rana/jsonlogic2sql"
+
+// For Google BigQuery
+tr, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery)
+
+// For Google Cloud Spanner
+tr, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectSpanner)
+
+// For PostgreSQL
+tr, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectPostgreSQL)
+
+// For DuckDB
+tr, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectDuckDB)
+
+// For ClickHouse
+tr, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectClickHouse)
+```
+
+## Dialect compatibility
+
+All dialects support:
+- ✅ Data access (var, missing, missing_some)
+- ✅ Comparisons (equality, inequality, greater/less than)
+- ✅ Logical operators (and, or, not, if)
+- ✅ Arithmetic (addition, subtraction, multiplication, division, modulo, max, min)
+- ✅ String operations (cat, substr, in)
+- ✅ Array operations (map, filter, reduce, all, some, none, merge, in)
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Basic usage" icon="rocket" href="/examples/basic">
+    Start with basic examples
+  </Card>
+  <Card title="Custom operators" icon="wrench" href="/examples/custom-operators">
+    Create dialect-aware custom operators
+  </Card>
+</CardGroup>

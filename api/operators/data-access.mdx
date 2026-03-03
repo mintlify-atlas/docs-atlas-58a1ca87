@@ -1,0 +1,301 @@
+---
+title: Data access operators
+description: var, missing, and missing_some operators for accessing and checking field values
+---
+
+Data access operators retrieve field values and check for missing or null fields in JSON Logic expressions.
+
+## var
+
+Accesses variable values by field name, with support for default values and array indexing.
+
+### Basic usage
+
+**JSON Logic:**
+```json
+{"var": "email"}
+```
+
+**SQL output:**
+```sql
+WHERE email
+```
+
+Accesses the `email` field directly.
+
+### With default value
+
+**JSON Logic:**
+```json
+{"var": ["status", "pending"]}
+```
+
+**SQL output:**
+```sql
+WHERE COALESCE(status, 'pending')
+```
+
+Returns the `status` field, or `"pending"` if `status` is NULL.
+
+<ParamField path="var" type="string | [string, any]">
+  Field name as string, or array with field name and default value
+</ParamField>
+
+### Array indexing
+
+**JSON Logic:**
+```json
+{"var": 1}
+```
+
+**SQL output (BigQuery/Spanner):**
+```sql
+WHERE data[OFFSET(1)]
+```
+
+**SQL output (PostgreSQL/DuckDB):**
+```sql
+WHERE data[1]
+```
+
+Accesses array element at index 1. Note: JSON Logic uses 0-based indexing.
+
+### Nested field access
+
+**JSON Logic:**
+```json
+{"var": "user.email"}
+```
+
+**SQL output (BigQuery/Spanner):**
+```sql
+WHERE user.email
+```
+
+**SQL output (PostgreSQL with JSONB):**
+```sql
+WHERE user.email
+```
+
+Accesses nested fields using dot notation. Actual SQL generation depends on your schema structure.
+
+### Schema validation
+
+When a [Schema](/api/schema) is provided, the `var` operator validates that the field exists:
+
+```go
+schema := jsonlogic2sql.NewSchema([]jsonlogic2sql.FieldSchema{
+    {Name: "email", Type: jsonlogic2sql.FieldTypeString},
+    {Name: "age", Type: jsonlogic2sql.FieldTypeInteger},
+})
+
+transpiler.SetSchema(schema)
+
+// Valid - field exists
+sql, _ := transpiler.Transpile(`{"var": "email"}`)
+
+// Error: field not in schema
+_, err := transpiler.Transpile(`{"var": "unknown_field"}`)
+// [E201] (operator: var): field 'unknown_field' is not defined in schema
+```
+
+### Error codes
+
+- `E201` (ErrFieldNotInSchema) - Field is not defined in schema (when schema validation is enabled)
+- `E304` (ErrInvalidDefaultValue) - Default value has invalid type or format
+
+## missing
+
+Checks if one or more fields are missing (NULL).
+
+### Single field
+
+**JSON Logic:**
+```json
+{"missing": "email"}
+```
+
+**SQL output:**
+```sql
+WHERE email IS NULL
+```
+
+Checks if the `email` field is NULL.
+
+<ParamField path="missing" type="string | string[]">
+  Field name as string, or array of field names to check
+</ParamField>
+
+### Multiple fields (OR logic)
+
+**JSON Logic:**
+```json
+{"missing": ["email", "phone"]}
+```
+
+**SQL output:**
+```sql
+WHERE (email IS NULL OR phone IS NULL)
+```
+
+Returns true if **any** of the specified fields are NULL.
+
+### Practical example
+
+**JSON Logic:**
+```json
+{
+  "if": [
+    {"missing": "email"},
+    "Email required",
+    "Email provided"
+  ]
+}
+```
+
+**SQL output:**
+```sql
+WHERE CASE WHEN email IS NULL THEN 'Email required' ELSE 'Email provided' END
+```
+
+Conditional expression based on whether email is missing.
+
+### Combined with other operators
+
+**JSON Logic:**
+```json
+{
+  "and": [
+    {"missing": "deleted_at"},
+    {"==": [{"var": "status"}, "active"]}
+  ]
+}
+```
+
+**SQL output:**
+```sql
+WHERE (deleted_at IS NULL AND status = 'active')
+```
+
+Finds active records that haven't been deleted.
+
+### Error codes
+
+- `E300` (ErrInsufficientArgs) - No field names provided
+- `E201` (ErrFieldNotInSchema) - Field not defined in schema (when schema validation is enabled)
+
+## missing_some
+
+Checks if at least a specified number of fields are missing. Useful for validating that users have provided enough information.
+
+### Basic usage
+
+**JSON Logic:**
+```json
+{"missing_some": [1, ["email", "phone", "address"]]}
+```
+
+**SQL output:**
+```sql
+WHERE (email IS NULL OR phone IS NULL OR address IS NULL)
+```
+
+Returns true if **at least 1** of the specified fields is NULL.
+
+<ParamField path="missing_some" type="[number, string[]]" required>
+  Array where first element is minimum number of missing fields, second element is array of field names
+</ParamField>
+
+### Require all fields present
+
+**JSON Logic:**
+```json
+{"missing_some": [3, ["name", "email", "phone"]]}
+```
+
+**SQL output:**
+```sql
+WHERE (name IS NULL OR email IS NULL OR phone IS NULL)
+```
+
+With threshold = 3, returns true if all 3 fields are missing (in practice, if any are missing since it uses OR logic).
+
+### Validation example
+
+**JSON Logic:**
+```json
+{
+  "if": [
+    {"missing_some": [2, ["email", "phone", "address"]]},
+    "Please provide at least 2 contact methods",
+    "Contact info sufficient"
+  ]
+}
+```
+
+**SQL output:**
+```sql
+WHERE CASE 
+  WHEN (email IS NULL OR phone IS NULL OR address IS NULL) 
+  THEN 'Please provide at least 2 contact methods' 
+  ELSE 'Contact info sufficient' 
+END
+```
+
+### Argument format
+
+The `missing_some` operator requires exactly 2 arguments in array form:
+
+1. **Minimum count** (number): Minimum number of fields that must be missing for the condition to be true
+2. **Field names** (string[]): Array of field names to check
+
+**Valid:**
+```json
+{"missing_some": [1, ["field1", "field2"]]}
+```
+
+**Invalid:**
+```json
+{"missing_some": ["field1", "field2"]}  // Missing count
+{"missing_some": 1}                      // Missing field array
+```
+
+### Error codes
+
+- `E300` (ErrInsufficientArgs) - Less than 2 arguments provided
+- `E302` (ErrInvalidArgument) - First argument is not a number, or second argument is not an array
+- `E201` (ErrFieldNotInSchema) - One or more fields not defined in schema (when schema validation is enabled)
+
+## Comparison of operators
+
+| Operator | Purpose | Returns true when |
+|----------|---------|------------------|
+| `var` | Access field value | Field has a value (or returns default) |
+| `missing` | Check for NULL | **Any** specified field is NULL |
+| `missing_some` | Check minimum missing | **At least N** fields are NULL |
+
+### Example comparison
+
+```json
+// Access field
+{"var": "email"}
+// → email
+
+// Check if field is NULL
+{"missing": "email"}
+// → email IS NULL
+
+// Check if 1+ fields are NULL
+{"missing_some": [1, ["email", "phone"]]}
+// → (email IS NULL OR phone IS NULL)
+
+// Check if 2+ fields are NULL  
+{"missing_some": [2, ["email", "phone", "address"]]}
+// → Still uses OR logic, checks if any are NULL
+```
+
+## See also
+
+- [Logical operators](/api/operators/logical) - Combine with `and`, `or`, `if` for complex logic
+- [Schema validation](/api/schema) - Enable field validation with schemas
+- [Error handling](/api/errors) - Handle field validation errors

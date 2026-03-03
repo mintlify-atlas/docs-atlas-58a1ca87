@@ -1,0 +1,484 @@
+---
+title: Performance
+description: Performance considerations and best practices for jsonlogic2sql
+---
+
+This guide covers performance optimization strategies, benchmarking, and best practices for using jsonlogic2sql in production environments.
+
+## Overview
+
+jsonlogic2sql is designed for performance with:
+
+- **Single-pass parsing**: Transpiles JSON Logic in one pass
+- **Zero allocations**: Minimal memory allocations for common operations
+- **Thread-safe registries**: Concurrent operator registration and lookup
+- **Efficient string building**: Uses `strings.Builder` for SQL generation
+
+<Info>
+The library has been tested with over 3,000 test cases covering all operators and edge cases (README.md:100).
+</Info>
+
+## Transpiler reuse
+
+### Reuse transpiler instances
+
+Creating a `Transpiler` instance has overhead. Reuse instances when possible:
+
+<CodeGroup>
+
+```go Good - Reuse transpiler
+// Create once
+transpiler, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery)
+
+// Register custom operators once
+transpiler.RegisterOperatorFunc("length", lengthFunc)
+transpiler.RegisterOperatorFunc("upper", upperFunc)
+
+// Reuse for multiple transpilations
+for _, logic := range logicExpressions {
+    sql, err := transpiler.Transpile(logic)
+    // ...
+}
+```
+
+```go Bad - Create new transpiler each time
+for _, logic := range logicExpressions {
+    // Inefficient: creates new instance each time
+    transpiler, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery)
+    transpiler.RegisterOperatorFunc("length", lengthFunc)
+    transpiler.RegisterOperatorFunc("upper", upperFunc)
+    sql, err := transpiler.Transpile(logic)
+    // ...
+}
+```
+
+</CodeGroup>
+
+**Why it matters:**
+
+- Each transpiler instance creates internal operator handlers
+- Custom operator registration involves map operations
+- Parsing overhead for operator initialization
+
+### Use convenience functions for one-off operations
+
+For single transpilations, use the convenience functions:
+
+```go transpiler.go:258-267
+sql, err := jsonlogic2sql.Transpile(
+    jsonlogic2sql.DialectBigQuery,
+    `{">": [{"var": "amount"}, 1000]}`,
+)
+```
+
+These create a new transpiler internally, which is fine for occasional use but not for loops.
+
+## Pre-parsed JSON
+
+Avoid repeated JSON parsing by using pre-parsed maps:
+
+<CodeGroup>
+
+```go Good - Parse JSON once
+var logic map[string]interface{}
+if err := json.Unmarshal(jsonBytes, &logic); err != nil {
+    return err
+}
+
+transpiler, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery)
+sql, err := transpiler.TranspileFromMap(logic)
+```
+
+```go Bad - Parse JSON every time
+transpiler, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery)
+// Parses JSON internally
+sql, err := transpiler.Transpile(jsonString)
+```
+
+</CodeGroup>
+
+**Methods for pre-parsed data:**
+
+```go transpiler.go:226-234
+// For map[string]interface{}
+sql, err := transpiler.TranspileFromMap(logic)
+
+// For any interface{}
+sql, err := transpiler.TranspileFromInterface(logic)
+```
+
+## Operator performance
+
+### Simple functions over handlers
+
+For stateless operators, use functions instead of handler structs:
+
+<CodeGroup>
+
+```go Good - Function
+transpiler.RegisterOperatorFunc("length", 
+    func(op string, args []interface{}) (string, error) {
+        return fmt.Sprintf("LENGTH(%s)", args[0]), nil
+    })
+```
+
+```go Slower - Handler struct
+type LengthOperator struct{}
+
+func (l *LengthOperator) ToSQL(operator string, args []interface{}) (string, error) {
+    return fmt.Sprintf("LENGTH(%s)", args[0]), nil
+}
+
+transpiler.RegisterOperator("length", &LengthOperator{})
+```
+
+</CodeGroup>
+
+Functions are wrapped in a lightweight `funcHandler` (operator.go:81-88) with less overhead than custom structs.
+
+### Validate arguments efficiently
+
+Check argument counts first before more expensive operations:
+
+```go
+func customOperator(op string, args []interface{}) (string, error) {
+    // Fast: check length first
+    if len(args) != 2 {
+        return "", fmt.Errorf("requires 2 arguments, got %d", len(args))
+    }
+    
+    // Then do more expensive operations
+    field := args[0].(string)
+    value := args[1].(string)
+    return fmt.Sprintf("%s = %s", field, value), nil
+}
+```
+
+### Avoid unnecessary allocations
+
+Use `fmt.Sprintf` efficiently:
+
+<CodeGroup>
+
+```go Good - Direct formatting
+return fmt.Sprintf("LENGTH(%s)", args[0]), nil
+```
+
+```go Bad - String concatenation
+result := "LENGTH("
+result += args[0].(string)
+result += ")"
+return result, nil
+```
+
+</CodeGroup>
+
+## Registry optimization
+
+### Clone for template registries
+
+Create a base registry once and clone for each use:
+
+```go
+// Global or package-level
+var baseRegistry = createBaseRegistry()
+
+func createBaseRegistry() *jsonlogic2sql.OperatorRegistry {
+    registry := jsonlogic2sql.NewOperatorRegistry()
+    registry.RegisterFunc("length", lengthFunc)
+    registry.RegisterFunc("upper", upperFunc)
+    registry.RegisterFunc("lower", lowerFunc)
+    return registry
+}
+
+// Per-request
+func handleRequest(dialect jsonlogic2sql.Dialect) (*jsonlogic2sql.Transpiler, error) {
+    tr, err := jsonlogic2sql.NewTranspiler(dialect)
+    if err != nil {
+        return nil, err
+    }
+    
+    // Fast: clones the map, doesn't re-register
+    appRegistry := baseRegistry.Clone()
+    
+    // Add any request-specific operators
+    // appRegistry.RegisterFunc(...)
+    
+    return tr, nil
+}
+```
+
+The `Clone()` method (operator.go:216-225) copies the internal map efficiently.
+
+### List operators sparingly
+
+The `List()` method allocates a new slice:
+
+```go operator.go:198-207
+// Allocates a new slice each time
+operators := registry.List()
+```
+
+Cache the list if you need it multiple times:
+
+```go
+// Cache the list
+operatorList := registry.List()
+
+// Reuse cached list
+for _, name := range operatorList {
+    // ...
+}
+```
+
+## Schema validation
+
+Schema validation adds overhead. Only use it when necessary:
+
+### Without schema (fastest)
+
+```go
+transpiler, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery)
+sql, _ := transpiler.Transpile(logic)
+```
+
+### With schema (adds validation)
+
+```go
+schema := jsonlogic2sql.NewSchema([]jsonlogic2sql.FieldSchema{
+    {Name: "amount", Type: jsonlogic2sql.FieldTypeInteger},
+    {Name: "status", Type: jsonlogic2sql.FieldTypeString},
+})
+
+config := &jsonlogic2sql.TranspilerConfig{
+    Dialect: jsonlogic2sql.DialectBigQuery,
+    Schema:  schema,
+}
+
+transpiler, _ := jsonlogic2sql.NewTranspilerWithConfig(config)
+sql, _ := transpiler.Transpile(logic) // Validates fields
+```
+
+<Tip>
+Use schema validation during development and testing, but consider disabling it in production if you trust your input data.
+</Tip>
+
+## Concurrent usage
+
+### Thread-safe patterns
+
+Transpiler instances are safe for concurrent reads:
+
+```go
+// Create once
+transpiler, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery)
+transpiler.RegisterOperatorFunc("length", lengthFunc)
+
+// Safe: concurrent transpilations
+var wg sync.WaitGroup
+for _, logic := range logicExpressions {
+    wg.Add(1)
+    go func(l string) {
+        defer wg.Done()
+        sql, err := transpiler.Transpile(l)
+        // ...
+    }(logic)
+}
+wg.Wait()
+```
+
+<Warning>
+Do not register operators concurrently while transpiling. Register all operators before concurrent use.
+</Warning>
+
+### Pool pattern for high-concurrency
+
+For extremely high concurrency, use a pool:
+
+```go
+type TranspilerPool struct {
+    pool sync.Pool
+    dialect jsonlogic2sql.Dialect
+}
+
+func NewTranspilerPool(dialect jsonlogic2sql.Dialect) *TranspilerPool {
+    return &TranspilerPool{
+        dialect: dialect,
+        pool: sync.Pool{
+            New: func() interface{} {
+                tr, _ := jsonlogic2sql.NewTranspiler(dialect)
+                // Register common operators
+                tr.RegisterOperatorFunc("length", lengthFunc)
+                return tr
+            },
+        },
+    }
+}
+
+func (p *TranspilerPool) Transpile(logic string) (string, error) {
+    tr := p.pool.Get().(*jsonlogic2sql.Transpiler)
+    defer p.pool.Put(tr)
+    return tr.Transpile(logic)
+}
+```
+
+## Nested operator performance
+
+Deeply nested operators have acceptable performance due to the single-pass design:
+
+```go operator_test.go:750-753
+// Complex nested expression - still efficient
+jsonlogic := `{
+  "and": [
+    {"some": [{"filter": [{"var": "data"}, {"and": [{"some": [{"var": "tags"}, {"==": [{"var": "elem"}, "important"]}]}, {">": [{"var": "value"}, 0]}]}]}, {"all": [{"var": "elem.items"}, {">=": [{"var": "elem.score"}, 50]}]}]},
+    {">": [{"reduce": [{"var": "totals"}, {"+": [{"var": "accumulator"}, {"*": [{"var": "current"}, {"if": [{">": [{"var": "current"}, 100]}, 2, 1]}]}]}, 0]}, 1000]}
+  ]
+}`
+
+sql, err := transpiler.Transpile(jsonlogic)
+// Processes in a single pass
+```
+
+## Memory optimization
+
+### Minimize string allocations
+
+The library uses `strings.Builder` internally for efficient string building. Custom operators should do the same for concatenation:
+
+<CodeGroup>
+
+```go Good - strings.Builder
+var builder strings.Builder
+builder.WriteString("CONCAT(")
+for i, arg := range args {
+    if i > 0 {
+        builder.WriteString(", ")
+    }
+    builder.WriteString(arg.(string))
+}
+builder.WriteString(")")
+return builder.String(), nil
+```
+
+```go Bad - String concatenation
+result := "CONCAT("
+for i, arg := range args {
+    if i > 0 {
+        result += ", "
+    }
+    result += arg.(string)
+}
+result += ")"
+return result, nil
+```
+
+</CodeGroup>
+
+### Reuse slices for List operations
+
+If calling `List()` repeatedly, consider caching:
+
+```go
+type CachedRegistry struct {
+    registry *jsonlogic2sql.OperatorRegistry
+    cached   []string
+    mu       sync.RWMutex
+}
+
+func (c *CachedRegistry) List() []string {
+    c.mu.RLock()
+    if c.cached != nil {
+        defer c.mu.RUnlock()
+        return c.cached
+    }
+    c.mu.RUnlock()
+    
+    c.mu.Lock()
+    defer c.mu.Unlock()
+    c.cached = c.registry.List()
+    return c.cached
+}
+```
+
+## Benchmarking
+
+Benchmark your specific use case:
+
+```go
+func BenchmarkTranspile(b *testing.B) {
+    transpiler, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery)
+    logic := `{"and": [{">": [{"var": "amount"}, 1000]}, {"==": [{"var": "status"}, "active"]}]}`
+    
+    b.ResetTimer()
+    for i := 0; i < b.N; i++ {
+        _, _ = transpiler.Transpile(logic)
+    }
+}
+
+func BenchmarkTranspileFromMap(b *testing.B) {
+    transpiler, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery)
+    
+    var logic map[string]interface{}
+    json.Unmarshal([]byte(`{"and": [{">": [{"var": "amount"}, 1000]}, {"==": [{"var": "status"}, "active"]}]}`), &logic)
+    
+    b.ResetTimer()
+    for i := 0; i < b.N; i++ {
+        _, _ = transpiler.TranspileFromMap(logic)
+    }
+}
+```
+
+## Best practices summary
+
+<AccordionGroup>
+
+<Accordion title="Reuse transpiler instances">
+Create a transpiler once and reuse it for multiple transpilations rather than creating new instances.
+</Accordion>
+
+<Accordion title="Use pre-parsed JSON">
+Parse JSON once and use `TranspileFromMap()` instead of parsing the same JSON repeatedly.
+</Accordion>
+
+<Accordion title="Register operators upfront">
+Register all custom operators during initialization, not during request processing.
+</Accordion>
+
+<Accordion title="Clone template registries">
+Create a base registry with common operators and clone it for each transpiler instance.
+</Accordion>
+
+<Accordion title="Validate arguments efficiently">
+Check argument count before doing expensive operations in custom operators.
+</Accordion>
+
+<Accordion title="Disable schema validation in production">
+Only use schema validation when necessary, as it adds overhead.
+</Accordion>
+
+<Accordion title="Use functions for simple operators">
+Prefer `RegisterOperatorFunc` over `RegisterOperator` for stateless operators.
+</Accordion>
+
+<Accordion title="Minimize allocations">
+Use `strings.Builder` for string concatenation in custom operators.
+</Accordion>
+
+</AccordionGroup>
+
+## Production checklist
+
+- [ ] Reuse transpiler instances across requests
+- [ ] Register all custom operators at startup
+- [ ] Use pre-parsed JSON when possible
+- [ ] Configure appropriate schema validation (on/off)
+- [ ] Test concurrent usage patterns
+- [ ] Benchmark with production-like data
+- [ ] Monitor memory usage
+- [ ] Cache frequently used operator lists
+
+## See also
+
+- [Operator registry](/advanced/operator-registry) - Managing operators efficiently
+- [Schema validation](/core-concepts/schema-validation) - When and how to use schemas
+- [Custom operators](/customization/custom-operators) - Creating efficient operators

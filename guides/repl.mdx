@@ -1,0 +1,323 @@
+---
+title: Interactive REPL
+description: Test JSON Logic expressions interactively with the built-in REPL tool
+---
+
+jsonlogic2sql includes an interactive REPL (Read-Eval-Print Loop) for testing JSON Logic expressions and seeing the generated SQL in real-time.
+
+## Installation and running
+
+<Steps>
+  <Step title="Using make">
+    ```bash
+    make run
+    ```
+  </Step>
+  
+  <Step title="Build manually">
+    ```bash
+    go build -o bin/repl ./cmd/repl
+    ./bin/repl
+    ```
+  </Step>
+</Steps>
+
+On startup, the REPL will prompt for an optional schema path. Press Enter to skip schema validation.
+
+## Basic usage
+
+Type JSON Logic expressions and see the SQL output immediately:
+
+```
+jsonlogic> {">": [{"var": "amount"}, 1000]}
+SQL: WHERE amount > 1000
+
+jsonlogic> {"and": [{"==": [{"var": "status"}, "active"]}, {">": [{"var": "count"}, 5]}]}
+SQL: WHERE (status = 'active' AND count > 5)
+```
+
+## Available commands
+
+| Command | Description |
+|---------|-------------|
+| `:help` | Show available commands |
+| `:examples` | Show example JSON Logic expressions |
+| `:dialect` | Change the SQL dialect |
+| `:schema <path>` | Load a schema JSON file for validation |
+| `:file <path>` | Read JSON Logic from a file |
+| `:clear` | Clear the screen |
+| `:quit` | Exit the REPL |
+
+## Changing SQL dialects
+
+Switch between supported SQL dialects using `:dialect`:
+
+```
+[BigQuery] jsonlogic> :dialect
+Select dialect:
+1. BigQuery
+2. Spanner
+3. PostgreSQL
+4. DuckDB
+5. ClickHouse
+Enter choice (1-5): 3
+
+[PostgreSQL] jsonlogic> {"merge": [{"var": "a"}, {"var": "b"}]}
+SQL: WHERE (a || b)
+```
+
+The prompt shows the current dialect in brackets. Different dialects generate different SQL for certain operators:
+
+<CodeGroup>
+
+```sql BigQuery
+[BigQuery] jsonlogic> {"merge": [{"var": "a"}, {"var": "b"}]}
+SQL: WHERE ARRAY_CONCAT(a, b)
+```
+
+```sql PostgreSQL
+[PostgreSQL] jsonlogic> {"merge": [{"var": "a"}, {"var": "b"}]}
+SQL: WHERE (a || b)
+```
+
+```sql ClickHouse
+[ClickHouse] jsonlogic> {"merge": [{"var": "a"}, {"var": "b"}]}
+SQL: WHERE arrayConcat(a, b)
+```
+
+</CodeGroup>
+
+## Loading a schema
+
+Use `:schema` to load a schema file for field validation:
+
+```
+[BigQuery] jsonlogic> :schema schema.json
+Schema loaded: schema.json
+
+[BigQuery] jsonlogic> {"==": [{"var": "status"}, "active"]}
+SQL: WHERE status = 'active'
+
+[BigQuery] jsonlogic> {"==": [{"var": "unknown_field"}, "test"]}
+Error: [E201] at $.==.var (operator: var): field 'unknown_field' is not defined in schema
+```
+
+**Example schema.json:**
+```json
+[
+    {"name": "order.amount", "type": "integer"},
+    {"name": "order.status", "type": "string"},
+    {"name": "user.verified", "type": "boolean"},
+    {"name": "user.roles", "type": "array"}
+]
+```
+
+## Reading from files
+
+For complex or large JSON Logic expressions, use the `:file` command:
+
+```bash
+# Save your JSON to a file
+echo '{"and": [...very large JSON...]}' > input.json
+```
+
+```
+[BigQuery] jsonlogic> :file input.json
+SQL: WHERE (...)
+```
+
+<Tip>
+Using `:file` is helpful when:
+- Your expression exceeds terminal line limits (~4KB)
+- You want to test expressions from version control
+- You're iterating on a complex filter
+</Tip>
+
+## Examples command
+
+The `:examples` command shows common JSON Logic patterns:
+
+```
+jsonlogic> :examples
+Example JSON Logic expressions:
+
+1. Simple Comparison
+   JSON: {">": [{"var": "amount"}, 1000]}
+   SQL:  WHERE amount > 1000
+
+2. Equality Check
+   JSON: {"==": [{"var": "status"}, "active"]}
+   SQL:  WHERE status = 'active'
+
+3. Logical AND
+   JSON: {"and": [{">": [{"var": "a"}, 10]}, {"<": [{"var": "b"}, 20]}]}
+   SQL:  WHERE (a > 10 AND b < 20)
+
+4. Logical OR
+   JSON: {"or": [{">=": [{"var": "failedAttempts"}, 5]}, {"in": [{"var": "country"}, ["CN", "RU"]]}]}
+   SQL:  WHERE (failedAttempts >= 5 OR country IN ('CN', 'RU'))
+
+5. Nested Conditions
+   JSON: {"and": [{">": [{"var": "transaction.amount"}, 10000]}, {"or": [{"==": [{"var": "user.verified"}, false]}, {"<": [{"var": "user.accountAgeDays"}, 7]}]}]}
+   SQL:  WHERE (transaction.amount > 10000 AND (user.verified = FALSE OR user.accountAgeDays < 7))
+
+...
+```
+
+<Tip>
+Use `:examples` when you're first learning JSON Logic syntax or need to quickly reference common patterns.
+</Tip>
+
+## Error messages
+
+The REPL displays detailed error messages with error codes:
+
+```
+jsonlogic> {"unknownOp": [1, 2]}
+Error: [E100] at $.unknownOp (operator: unknownOp): unsupported operator: unknownOp
+
+jsonlogic> {invalid json}
+Error: [E007]: invalid JSON: invalid character 'i' looking for beginning of object key string
+```
+
+With a schema loaded:
+
+```
+jsonlogic> :schema schema.json
+Schema loaded: schema.json
+
+jsonlogic> {"==": [{"var": "unknown_field"}, "test"]}
+Error: [E201] at $.==.var (operator: var): field 'unknown_field' is not defined in schema
+
+jsonlogic> {"==": [{"var": "status"}, "invalid_value"]}
+Error: [E203]: invalid enum value 'invalid_value' for field 'status': allowed values are [active pending cancelled]
+```
+
+## Tips for effective use
+
+<CardGroup cols={2}>
+  <Card title="Start with examples" icon="book">
+    Run `:examples` first to learn common patterns before writing your own expressions
+  </Card>
+  <Card title="Test across dialects" icon="database">
+    Use `:dialect` to see how SQL differs across BigQuery, PostgreSQL, ClickHouse, etc.
+  </Card>
+  <Card title="Use files for complex JSON" icon="file">
+    Avoid terminal line limits by saving large expressions to files and using `:file`
+  </Card>
+  <Card title="Validate with schema" icon="shield-check">
+    Load a schema with `:schema` to catch field errors before using queries in production
+  </Card>
+</CardGroup>
+
+## Workflow example
+
+<Steps>
+  <Step title="Start the REPL">
+    ```bash
+    make run
+    ```
+  </Step>
+  
+  <Step title="Load your schema">
+    ```
+    jsonlogic> :schema ./schemas/production.json
+    Schema loaded: ./schemas/production.json
+    ```
+  </Step>
+  
+  <Step title="Set your dialect">
+    ```
+    [BigQuery] jsonlogic> :dialect
+    Select dialect:
+    1. BigQuery
+    2. Spanner
+    3. PostgreSQL
+    4. DuckDB
+    5. ClickHouse
+    Enter choice (1-5): 1
+    ```
+  </Step>
+  
+  <Step title="Test your expressions">
+    ```
+    [BigQuery] jsonlogic> {"and": [{"==": [{"var": "status"}, "active"]}, {">": [{"var": "amount"}, 1000]}]}
+    SQL: WHERE (status = 'active' AND amount > 1000)
+    ```
+  </Step>
+  
+  <Step title="Copy SQL to your application">
+    Use the generated SQL directly in your queries:
+    
+    ```go
+    query := fmt.Sprintf(
+        "SELECT * FROM orders %s",
+        "WHERE (status = 'active' AND amount > 1000)",
+    )
+    ```
+  </Step>
+</Steps>
+
+## Keyboard shortcuts
+
+The REPL supports standard readline keyboard shortcuts:
+
+| Shortcut | Action |
+|----------|--------|
+| `Ctrl+C` | Cancel current input |
+| `Ctrl+D` | Exit REPL |
+| `Ctrl+L` | Clear screen (same as `:clear`) |
+| `Up/Down arrows` | Navigate command history |
+| `Ctrl+R` | Reverse search history |
+
+## Common use cases
+
+### Testing filter logic before deployment
+
+```
+[BigQuery] jsonlogic> :schema production-schema.json
+Schema loaded: production-schema.json
+
+[BigQuery] jsonlogic> :file filters/fraud-detection.json
+SQL: WHERE (transaction.amount > 10000 AND (user.verified = FALSE OR user.accountAgeDays < 7) AND user.country IN ('high_risk_1', 'high_risk_2'))
+```
+
+### Comparing SQL across dialects
+
+```
+[BigQuery] jsonlogic> {"in": ["admin", {"var": "roles"}]}
+SQL: WHERE 'admin' IN UNNEST(roles)
+
+[BigQuery] jsonlogic> :dialect
+Enter choice (1-5): 3
+
+[PostgreSQL] jsonlogic> {"in": ["admin", {"var": "roles"}]}
+SQL: WHERE 'admin' = ANY(roles)
+```
+
+### Debugging validation errors
+
+```
+[BigQuery] jsonlogic> {">": [{"var": "name"}, 100]}
+Error: [E200]: numeric operation on non-numeric field 'name' (type: string)
+
+[BigQuery] jsonlogic> {">": [{"var": "amount"}, 100]}
+SQL: WHERE amount > 100
+```
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Basic usage" icon="book" href="/guides/basic-usage">
+    Learn how to use the library in your Go code
+  </Card>
+  <Card title="Schema validation" icon="shield-check" href="/guides/schema-validation">
+    Create schemas for use with the REPL
+  </Card>
+  <Card title="Error handling" icon="triangle-exclamation" href="/guides/error-handling">
+    Understand error codes shown in the REPL
+  </Card>
+  <Card title="Custom operators" icon="wrench" href="/guides/custom-operators">
+    Learn about extending with custom operators
+  </Card>
+</CardGroup>

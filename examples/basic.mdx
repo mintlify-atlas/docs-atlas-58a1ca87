@@ -1,0 +1,403 @@
+---
+title: Basic usage
+description: Common patterns and basic examples using jsonlogic2sql
+---
+
+This guide shows basic usage patterns for jsonlogic2sql with real examples from the library.
+
+## Getting started
+
+Create a transpiler and convert JSON Logic to SQL:
+
+```go
+import "github.com/h22rana/jsonlogic2sql"
+
+// Create transpiler for your SQL dialect
+tr, err := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery)
+if err != nil {
+    panic(err)
+}
+
+// Transpile JSON Logic to SQL
+sql, err := tr.Transpile(`{">": [{"var": "amount"}, 1000]}`)
+// Result: "WHERE amount > 1000"
+```
+
+## Simple comparisons
+
+### Greater than
+
+<CodeGroup>
+```json JSON Logic
+{">" : [{"var": "amount"}, 1000]}
+```
+
+```sql SQL Output
+WHERE amount > 1000
+```
+</CodeGroup>
+
+### Equality
+
+<CodeGroup>
+```json JSON Logic
+{"==" : [{"var": "status"}, "active"]}
+```
+
+```sql SQL Output
+WHERE status = 'active'
+```
+</CodeGroup>
+
+### Less than
+
+<CodeGroup>
+```json JSON Logic
+{"<" : [{"var": "age"}, 65]}
+```
+
+```sql SQL Output
+WHERE age < 65
+```
+</CodeGroup>
+
+## Working with variables
+
+### Simple variable access
+
+<CodeGroup>
+```json JSON Logic
+{"var": "name"}
+```
+
+```sql SQL Output
+WHERE name
+```
+</CodeGroup>
+
+### Dotted path access
+
+<CodeGroup>
+```json JSON Logic
+{"var": "user.name"}
+```
+
+```sql SQL Output
+WHERE user.name
+```
+</CodeGroup>
+
+### Variable with default value
+
+<CodeGroup>
+```json JSON Logic
+{"var": ["status", "pending"]}
+```
+
+```sql SQL Output
+WHERE COALESCE(status, 'pending')
+```
+</CodeGroup>
+
+## Logical operators
+
+### AND condition
+
+<CodeGroup>
+```json JSON Logic
+{
+  "and": [
+    {"==": [{"var": "status"}, "active"]},
+    {">": [{"var": "score"}, 100]}
+  ]
+}
+```
+
+```sql SQL Output
+WHERE (status = 'active' AND score > 100)
+```
+</CodeGroup>
+
+### OR condition
+
+<CodeGroup>
+```json JSON Logic
+{
+  "or": [
+    {">=": [{"var": "failedAttempts"}, 5]},
+    {"in": [{"var": "country"}, ["CN", "RU"]]}
+  ]
+}
+```
+
+```sql SQL Output
+WHERE (failedAttempts >= 5 OR country IN ('CN', 'RU'))
+```
+</CodeGroup>
+
+### NOT condition
+
+<CodeGroup>
+```json JSON Logic
+{"!": [{"var": "isDeleted"}]}
+```
+
+```sql SQL Output
+WHERE NOT (isDeleted)
+```
+</CodeGroup>
+
+## NULL handling
+
+### Check if field is NULL
+
+<CodeGroup>
+```json JSON Logic
+{"==": [{"var": "deleted_at"}, null]}
+```
+
+```sql SQL Output
+WHERE deleted_at IS NULL
+```
+</CodeGroup>
+
+### Check if field is NOT NULL
+
+<CodeGroup>
+```json JSON Logic
+{"!=": [{"var": "field"}, null]}
+```
+
+```sql SQL Output
+WHERE field IS NOT NULL
+```
+</CodeGroup>
+
+## Numeric operations
+
+### Addition
+
+<CodeGroup>
+```json JSON Logic
+{"+": [{"var": "price"}, {"var": "tax"}]}
+```
+
+```sql SQL Output
+WHERE (price + tax)
+```
+</CodeGroup>
+
+### Multiplication
+
+<CodeGroup>
+```json JSON Logic
+{"*": [{"var": "price"}, 1.2]}
+```
+
+```sql SQL Output
+WHERE (price * 1.2)
+```
+</CodeGroup>
+
+### Maximum value
+
+<CodeGroup>
+```json JSON Logic
+{"max": [{"var": "score1"}, {"var": "score2"}, {"var": "score3"}]}
+```
+
+```sql SQL Output
+WHERE GREATEST(score1, score2, score3)
+```
+</CodeGroup>
+
+### Minimum value
+
+<CodeGroup>
+```json JSON Logic
+{"min": [{"var": "price1"}, {"var": "price2"}]}
+```
+
+```sql SQL Output
+WHERE LEAST(price1, price2)
+```
+</CodeGroup>
+
+## String operations
+
+### Concatenation
+
+<CodeGroup>
+```json JSON Logic
+{"cat": [{"var": "firstName"}, " ", {"var": "lastName"}]}
+```
+
+```sql SQL Output
+WHERE CONCAT(firstName, ' ', lastName)
+```
+</CodeGroup>
+
+### Substring
+
+<CodeGroup>
+```json JSON Logic
+{"substr": [{"var": "email"}, 0, 10]}
+```
+
+```sql SQL Output
+WHERE SUBSTR(email, 1, 10)
+```
+</CodeGroup>
+
+## Array operations
+
+### IN array
+
+<CodeGroup>
+```json JSON Logic
+{"in": [{"var": "country"}, ["US", "CA", "MX"]]}
+```
+
+```sql SQL Output
+WHERE country IN ('US', 'CA', 'MX')
+```
+</CodeGroup>
+
+### String containment
+
+<CodeGroup>
+```json JSON Logic
+{"in": ["test", "this is a test string"]}
+```
+
+```sql SQL Output  
+WHERE POSITION('test' IN 'this is a test string') > 0
+```
+</CodeGroup>
+
+## Conditional (IF) statements
+
+### Simple IF
+
+<CodeGroup>
+```json JSON Logic
+{
+  "if": [
+    {">": [{"var": "age"}, 18]},
+    "adult",
+    "minor"
+  ]
+}
+```
+
+```sql SQL Output
+WHERE CASE WHEN age > 18 THEN 'adult' ELSE 'minor' END
+```
+</CodeGroup>
+
+### IF with complex condition
+
+<CodeGroup>
+```json JSON Logic
+{
+  "if": [
+    {
+      "and": [
+        {">=": [{"var": "age"}, 18]},
+        {"==": [{"var": "country"}, "US"]}
+      ]
+    },
+    "eligible",
+    "ineligible"
+  ]
+}
+```
+
+```sql SQL Output
+WHERE CASE WHEN (age >= 18 AND country = 'US') THEN 'eligible' ELSE 'ineligible' END
+```
+</CodeGroup>
+
+## Missing field checks
+
+### Single field
+
+<CodeGroup>
+```json JSON Logic
+{"missing": "email"}
+```
+
+```sql SQL Output
+WHERE email IS NULL
+```
+</CodeGroup>
+
+### Multiple fields
+
+<CodeGroup>
+```json JSON Logic
+{"missing": ["email", "phone", "address"]}
+```
+
+```sql SQL Output
+WHERE (email IS NULL OR phone IS NULL OR address IS NULL)
+```
+</CodeGroup>
+
+### Missing some fields
+
+<CodeGroup>
+```json JSON Logic
+{"missing_some": [1, ["field1", "field2"]]}
+```
+
+```sql SQL Output
+WHERE (field1 IS NULL OR field2 IS NULL)
+```
+</CodeGroup>
+
+## Chained comparisons
+
+Chain comparisons for "between" style queries:
+
+<CodeGroup>
+```json JSON Logic
+{"<": [0, {"var": "temp"}, 100]}
+```
+
+```sql SQL Output
+WHERE (0 < temp AND temp < 100)
+```
+</CodeGroup>
+
+<CodeGroup>
+```json JSON Logic
+{"<=": [0, {"var": "score"}, 100]}
+```
+
+```sql SQL Output
+WHERE (0 <= score AND score <= 100)
+```
+</CodeGroup>
+
+## Using TranspileCondition
+
+Get SQL without the `WHERE` keyword:
+
+```go
+tr, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery)
+
+// Returns: "amount > 1000" (no WHERE prefix)
+sql, err := tr.TranspileCondition(`{">": [{"var": "amount"}, 1000]}`)
+```
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Complex queries" icon="code" href="/examples/complex-queries">
+    Multi-condition queries and nested expressions
+  </Card>
+  <Card title="Custom operators" icon="wrench" href="/examples/custom-operators">
+    Extend the library with custom operators
+  </Card>
+</CardGroup>

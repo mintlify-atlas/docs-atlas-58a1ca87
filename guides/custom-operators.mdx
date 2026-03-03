@@ -1,0 +1,424 @@
+---
+title: Custom operators
+description: How to register and use custom operators to extend jsonlogic2sql with additional SQL functions
+---
+
+Extend jsonlogic2sql with custom operators to support additional SQL functions like `LENGTH`, `UPPER`, `LOWER`, and more.
+
+## Quick example
+
+Register a custom operator using a simple function:
+
+```go
+transpiler, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery)
+
+err := transpiler.RegisterOperatorFunc("length", func(op string, args []interface{}) (string, error) {
+    if len(args) != 1 {
+        return "", fmt.Errorf("length requires exactly 1 argument")
+    }
+    return fmt.Sprintf("LENGTH(%s)", args[0]), nil
+})
+
+// Use the custom operator
+sql, _ := transpiler.Transpile(`{"length": [{"var": "email"}]}`)
+// Output: WHERE LENGTH(email)
+
+// Use in comparisons
+sql, _ = transpiler.Transpile(`{">": [{"length": [{"var": "email"}]}, 10]}`)
+// Output: WHERE LENGTH(email) > 10
+```
+
+## Registration methods
+
+jsonlogic2sql provides multiple ways to register custom operators:
+
+<Steps>
+  <Step title="Simple function">
+    Use `RegisterOperatorFunc` for simple, stateless operators:
+    
+    ```go
+    transpiler.RegisterOperatorFunc("upper", func(op string, args []interface{}) (string, error) {
+        if len(args) != 1 {
+            return "", fmt.Errorf("upper requires exactly 1 argument")
+        }
+        return fmt.Sprintf("UPPER(%s)", args[0]), nil
+    })
+    ```
+  </Step>
+  
+  <Step title="Handler struct">
+    Implement the `OperatorHandler` interface for operators that need state:
+    
+    ```go
+    type UpperOperator struct{}
+    
+    func (u *UpperOperator) ToSQL(operator string, args []interface{}) (string, error) {
+        if len(args) != 1 {
+            return "", fmt.Errorf("upper requires exactly 1 argument")
+        }
+        return fmt.Sprintf("UPPER(%s)", args[0]), nil
+    }
+    
+    transpiler.RegisterOperator("upper", &UpperOperator{})
+    ```
+  </Step>
+  
+  <Step title="Dialect-aware function">
+    Use `RegisterDialectAwareOperatorFunc` when SQL generation differs by dialect:
+    
+    ```go
+    transpiler.RegisterDialectAwareOperatorFunc("safeDivide",
+        func(op string, args []interface{}, dialect jsonlogic2sql.Dialect) (string, error) {
+            numerator := args[0].(string)
+            denominator := args[1].(string)
+            
+            switch dialect {
+            case jsonlogic2sql.DialectBigQuery:
+                return fmt.Sprintf("SAFE_DIVIDE(%s, %s)", numerator, denominator), nil
+            case jsonlogic2sql.DialectClickHouse:
+                return fmt.Sprintf("if(%s = 0, NULL, %s / %s)", denominator, numerator, denominator), nil
+            default:
+                return fmt.Sprintf("CASE WHEN %s = 0 THEN NULL ELSE %s / %s END",
+                    denominator, numerator, denominator), nil
+            }
+        })
+    ```
+  </Step>
+</Steps>
+
+## Working with arguments
+
+Custom operator functions receive arguments as `[]interface{}`, where each element is the SQL representation of the argument:
+
+```go
+transpiler.RegisterOperatorFunc("coalesce", func(op string, args []interface{}) (string, error) {
+    if len(args) == 0 {
+        return "", fmt.Errorf("coalesce requires at least 1 argument")
+    }
+    
+    result := "COALESCE("
+    for i, arg := range args {
+        if i > 0 {
+            result += ", "
+        }
+        result += fmt.Sprintf("%s", arg)
+    }
+    result += ")"
+    return result, nil
+})
+
+sql, _ := transpiler.Transpile(`{
+    "coalesce": [{"var": "nickname"}, {"var": "name"}, "Unknown"]
+}`)
+// Output: WHERE COALESCE(nickname, name, 'Unknown')
+```
+
+<Warning>
+Arguments are already processed by the transpiler. String literals are quoted, variables are resolved, and nested expressions are evaluated. Don't quote or process arguments again.
+</Warning>
+
+## Stateful operators
+
+Use handler structs when your operator needs configuration:
+
+```go
+type ConcatWithSeparatorOperator struct {
+    Separator string
+}
+
+func (c *ConcatWithSeparatorOperator) ToSQL(operator string, args []interface{}) (string, error) {
+    if len(args) < 2 {
+        return "", fmt.Errorf("concat_ws requires at least 2 arguments")
+    }
+    result := fmt.Sprintf("%s", args[0])
+    for i := 1; i < len(args); i++ {
+        result += fmt.Sprintf(" || '%s' || %s", c.Separator, args[i])
+    }
+    return result, nil
+}
+
+transpiler.RegisterOperator("concat_ws", &ConcatWithSeparatorOperator{Separator: ", "})
+
+sql, _ := transpiler.Transpile(`{
+    "concat_ws": [{"var": "first"}, {"var": "last"}]
+}`)
+// Output: WHERE first || ', ' || last
+```
+
+## Dialect-aware operators
+
+For operators that need different SQL per dialect, use dialect-aware registration:
+
+### Using a function
+
+```go
+transpiler.RegisterDialectAwareOperatorFunc("safeDivide",
+    func(op string, args []interface{}, dialect jsonlogic2sql.Dialect) (string, error) {
+        if len(args) != 2 {
+            return "", fmt.Errorf("safeDivide requires exactly 2 arguments")
+        }
+        numerator := args[0].(string)
+        denominator := args[1].(string)
+
+        switch dialect {
+        case jsonlogic2sql.DialectBigQuery:
+            // BigQuery has built-in SAFE_DIVIDE
+            return fmt.Sprintf("SAFE_DIVIDE(%s, %s)", numerator, denominator), nil
+        case jsonlogic2sql.DialectClickHouse:
+            // ClickHouse uses if() expression
+            return fmt.Sprintf("if(%s = 0, NULL, %s / %s)", denominator, numerator, denominator), nil
+        default:
+            // Other dialects use CASE expression
+            return fmt.Sprintf("CASE WHEN %s = 0 THEN NULL ELSE %s / %s END",
+                denominator, numerator, denominator), nil
+        }
+    })
+
+sql, _ := transpiler.Transpile(`{"safeDivide": [{"var": "total"}, {"var": "count"}]}`)
+// BigQuery: WHERE SAFE_DIVIDE(total, count)
+// ClickHouse: WHERE if(count = 0, NULL, total / count)
+// Others: WHERE CASE WHEN count = 0 THEN NULL ELSE total / count END
+```
+
+### Using a handler struct
+
+```go
+type SafeDivideOperator struct{}
+
+func (s *SafeDivideOperator) ToSQLWithDialect(op string, args []interface{}, dialect jsonlogic2sql.Dialect) (string, error) {
+    if len(args) != 2 {
+        return "", fmt.Errorf("safeDivide requires exactly 2 arguments")
+    }
+    numerator := args[0].(string)
+    denominator := args[1].(string)
+
+    switch dialect {
+    case jsonlogic2sql.DialectBigQuery:
+        return fmt.Sprintf("SAFE_DIVIDE(%s, %s)", numerator, denominator), nil
+    case jsonlogic2sql.DialectSpanner:
+        return fmt.Sprintf("CASE WHEN %s = 0 THEN NULL ELSE %s / %s END",
+            denominator, numerator, denominator), nil
+    default:
+        return "", fmt.Errorf("unsupported dialect: %v", dialect)
+    }
+}
+
+transpiler.RegisterDialectAwareOperator("safeDivide", &SafeDivideOperator{})
+```
+
+## Nested custom operators
+
+Custom operators work seamlessly when nested inside built-in operators:
+
+```go
+transpiler.RegisterOperatorFunc("toLower", func(op string, args []interface{}) (string, error) {
+    return fmt.Sprintf("LOWER(%s)", args[0]), nil
+})
+
+transpiler.RegisterOperatorFunc("toUpper", func(op string, args []interface{}) (string, error) {
+    return fmt.Sprintf("UPPER(%s)", args[0]), nil
+})
+
+// Inside string concatenation
+sql, _ := transpiler.Transpile(`{
+    "cat": [
+        {"toLower": [{"var": "firstName"}]},
+        " ",
+        {"toUpper": [{"var": "lastName"}]}
+    ]
+}`)
+// Output: WHERE CONCAT(LOWER(firstName), ' ', UPPER(lastName))
+
+// Inside conditional
+sql, _ = transpiler.Transpile(`{
+    "if": [
+        {"==": [{"var": "type"}, "premium"]},
+        {"toUpper": [{"var": "name"}]},
+        {"toLower": [{"var": "name"}]}
+    ]
+}`)
+// Output: WHERE CASE WHEN type = 'premium' THEN UPPER(name) ELSE LOWER(name) END
+
+// Inside logical operators
+sql, _ = transpiler.Transpile(`{
+    "and": [
+        {"==": [{"toLower": [{"var": "status"}]}, "active"]},
+        {">": [{"var": "amount"}, 100]}
+    ]
+}`)
+// Output: WHERE (LOWER(status) = 'active' AND amount > 100)
+```
+
+## Managing custom operators
+
+jsonlogic2sql provides methods to manage registered operators:
+
+```go
+// Check if an operator is registered
+if transpiler.HasCustomOperator("length") {
+    fmt.Println("length is registered")
+}
+
+// List all custom operators
+operators := transpiler.ListCustomOperators()
+fmt.Println(operators) // ["length", "upper", "toLower"]
+
+// Unregister an operator
+if transpiler.UnregisterOperator("length") {
+    fmt.Println("length was removed")
+}
+
+// Clear all custom operators
+transpiler.ClearCustomOperators()
+```
+
+## Multiple custom operators example
+
+```go
+transpiler, _ := jsonlogic2sql.NewTranspiler(jsonlogic2sql.DialectBigQuery)
+
+// Register string operators
+transpiler.RegisterOperatorFunc("length", func(op string, args []interface{}) (string, error) {
+    return fmt.Sprintf("LENGTH(%s)", args[0]), nil
+})
+
+transpiler.RegisterOperatorFunc("upper", func(op string, args []interface{}) (string, error) {
+    return fmt.Sprintf("UPPER(%s)", args[0]), nil
+})
+
+transpiler.RegisterOperatorFunc("lower", func(op string, args []interface{}) (string, error) {
+    return fmt.Sprintf("LOWER(%s)", args[0]), nil
+})
+
+// Use multiple operators together
+sql, _ := transpiler.Transpile(`{
+    "and": [
+        {">": [{"length": [{"var": "name"}]}, 5]},
+        {"==": [{"upper": [{"var": "status"}]}, "ACTIVE"]}
+    ]
+}`)
+// Output: WHERE (LENGTH(name) > 5 AND UPPER(status) = 'ACTIVE')
+```
+
+## Common custom operators
+
+Here are some commonly useful custom operators:
+
+<CodeGroup>
+
+```go String functions
+// String length
+transpiler.RegisterOperatorFunc("length", func(op string, args []interface{}) (string, error) {
+    return fmt.Sprintf("LENGTH(%s)", args[0]), nil
+})
+
+// Uppercase
+transpiler.RegisterOperatorFunc("upper", func(op string, args []interface{}) (string, error) {
+    return fmt.Sprintf("UPPER(%s)", args[0]), nil
+})
+
+// Lowercase
+transpiler.RegisterOperatorFunc("lower", func(op string, args []interface{}) (string, error) {
+    return fmt.Sprintf("LOWER(%s)", args[0]), nil
+})
+
+// Trim whitespace
+transpiler.RegisterOperatorFunc("trim", func(op string, args []interface{}) (string, error) {
+    return fmt.Sprintf("TRIM(%s)", args[0]), nil
+})
+```
+
+```go Pattern matching
+// Starts with
+transpiler.RegisterOperatorFunc("startsWith", func(op string, args []interface{}) (string, error) {
+    return fmt.Sprintf("%s LIKE '%s%%'", args[0], args[1]), nil
+})
+
+// Ends with
+transpiler.RegisterOperatorFunc("endsWith", func(op string, args []interface{}) (string, error) {
+    return fmt.Sprintf("%s LIKE '%%%s'", args[0], args[1]), nil
+})
+
+// Contains
+transpiler.RegisterOperatorFunc("contains", func(op string, args []interface{}) (string, error) {
+    return fmt.Sprintf("%s LIKE '%%%s%%'", args[0], args[1]), nil
+})
+```
+
+```go Date/time functions
+// Current timestamp
+transpiler.RegisterOperatorFunc("now", func(op string, args []interface{}) (string, error) {
+    return "CURRENT_TIMESTAMP()", nil
+})
+
+// Extract year
+transpiler.RegisterOperatorFunc("year", func(op string, args []interface{}) (string, error) {
+    return fmt.Sprintf("EXTRACT(YEAR FROM %s)", args[0]), nil
+})
+
+// Date difference
+transpiler.RegisterOperatorFunc("dateDiff", func(op string, args []interface{}) (string, error) {
+    return fmt.Sprintf("DATE_DIFF(%s, %s, DAY)", args[0], args[1]), nil
+})
+```
+
+```go Math functions
+// Absolute value
+transpiler.RegisterOperatorFunc("abs", func(op string, args []interface{}) (string, error) {
+    return fmt.Sprintf("ABS(%s)", args[0]), nil
+})
+
+// Round
+transpiler.RegisterOperatorFunc("round", func(op string, args []interface{}) (string, error) {
+    return fmt.Sprintf("ROUND(%s)", args[0]), nil
+})
+
+// Power
+transpiler.RegisterOperatorFunc("power", func(op string, args []interface{}) (string, error) {
+    return fmt.Sprintf("POWER(%s, %s)", args[0], args[1]), nil
+})
+```
+
+</CodeGroup>
+
+## Error handling
+
+Custom operators should return descriptive errors:
+
+```go
+transpiler.RegisterOperatorFunc("divide", func(op string, args []interface{}) (string, error) {
+    if len(args) != 2 {
+        return "", fmt.Errorf("divide requires exactly 2 arguments, got %d", len(args))
+    }
+    return fmt.Sprintf("(%s / %s)", args[0], args[1]), nil
+})
+
+_, err := transpiler.Transpile(`{"divide": [{"var": "x"}]}`)
+// Error: [E102] at $.divide (operator: divide): divide requires exactly 2 arguments, got 1
+```
+
+## Restrictions
+
+<Warning>
+**Cannot override built-in operators**
+
+You cannot register custom operators with names that conflict with built-in operators like `and`, `or`, `if`, `var`, `+`, `-`, etc.
+
+```go
+err := transpiler.RegisterOperatorFunc("and", func(op string, args []interface{}) (string, error) {
+    return "CUSTOM_AND", nil
+})
+// Error: cannot override built-in operator: and
+```
+</Warning>
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Schema validation" icon="shield-check" href="/guides/schema-validation">
+    Add field validation and type checking
+  </Card>
+  <Card title="Error handling" icon="triangle-exclamation" href="/guides/error-handling">
+    Handle errors from custom operators
+  </Card>
+</CardGroup>

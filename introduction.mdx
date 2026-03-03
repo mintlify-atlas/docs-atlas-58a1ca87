@@ -1,0 +1,123 @@
+---
+title: Introduction
+description: Convert JSON Logic expressions into SQL WHERE clauses with support for multiple SQL dialects
+---
+
+<img
+  className="block dark:hidden"
+  src="/images/hero-light.svg"
+  alt="Hero Light"
+/>
+<img
+  className="hidden dark:block"
+  src="/images/hero-dark.svg"
+  alt="Hero Dark"
+/>
+
+## Overview
+
+jsonlogic2sql is a Go library that converts [JSON Logic](http://jsonlogic.com/) expressions into SQL. It provides a clean, type-safe API for transforming JSON Logic rules into SQL WHERE clauses or standalone conditions, with support for multiple SQL dialects.
+
+<CodeGroup>
+```go Simple example
+package main
+
+import (
+    "fmt"
+    "github.com/h22rana/jsonlogic2sql"
+)
+
+func main() {
+    sql, err := jsonlogic2sql.Transpile(
+        jsonlogic2sql.DialectBigQuery,
+        `{">": [{"var": "amount"}, 1000]}`,
+    )
+    if err != nil {
+        panic(err)
+    }
+    fmt.Println(sql) // Output: WHERE amount > 1000
+}
+```
+
+```go Complex conditions
+sql, err := jsonlogic2sql.Transpile(
+    jsonlogic2sql.DialectBigQuery,
+    `{"and": [
+        {"==": [{"var": "status"}, "pending"]},
+        {">": [{"var": "amount"}, 5000]}
+    ]}`,
+)
+// Output: WHERE (status = 'pending' AND amount > 5000)
+```
+</CodeGroup>
+
+## Key features
+
+<CardGroup cols={2}>
+  <Card title="Complete JSON Logic support" icon="code">
+    Implements all core JSON Logic operators including comparison, logical, numeric, array, and string operations
+  </Card>
+  <Card title="Multiple SQL dialects" icon="database">
+    Target BigQuery, Spanner, PostgreSQL, DuckDB, or ClickHouse with dialect-specific SQL generation
+  </Card>
+  <Card title="Custom operators" icon="puzzle-piece">
+    Extensible registry pattern for adding custom SQL functions and operators
+  </Card>
+  <Card title="Schema validation" icon="shield-check">
+    Optional field schema for strict column validation and type checking
+  </Card>
+  <Card title="Structured errors" icon="triangle-exclamation">
+    Error codes and JSONPath locations for easy debugging
+  </Card>
+  <Card title="Library and CLI" icon="terminal">
+    Both programmatic API and interactive REPL for testing
+  </Card>
+</CardGroup>
+
+## Supported operators
+
+| Category | Operators |
+|----------|----------|
+| **Data access** | `var`, `missing`, `missing_some` |
+| **Comparison** | `==`, `===`, `!=`, `!==`, `>`, `>=`, `<`, `<=` |
+| **Logical** | `and`, `or`, `!`, `!!`, `if` |
+| **Numeric** | `+`, `-`, `*`, `/`, `%`, `max`, `min` |
+| **Array** | `in`, `map`, `filter`, `reduce`, `all`, `some`, `none`, `merge` |
+| **String** | `in`, `cat`, `substr` |
+
+## Supported dialects
+
+| Dialect | Constant |
+|---------|----------|
+| Google BigQuery | `DialectBigQuery` |
+| Google Cloud Spanner | `DialectSpanner` |
+| PostgreSQL | `DialectPostgreSQL` |
+| DuckDB | `DialectDuckDB` |
+| ClickHouse | `DialectClickHouse` |
+
+## Get started
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Get up and running with jsonlogic2sql in minutes
+  </Card>
+  <Card title="Installation" icon="download" href="/installation">
+    Install the library in your Go project
+  </Card>
+  <Card title="Operators" icon="function" href="/concepts/operators">
+    Learn about all supported operators with examples
+  </Card>
+  <Card title="SQL dialects" icon="database" href="/concepts/dialects">
+    Understand dialect-specific SQL generation
+  </Card>
+</CardGroup>
+
+## Important notes
+
+<Warning>
+**SQL injection:** This library does NOT handle SQL injection prevention. The caller is responsible for validating input and using parameterized queries where appropriate.
+</Warning>
+
+<Note>
+**Semantic correctness:** This library assumes that the input JSON Logic is semantically correct. The transpiler generates SQL that directly corresponds to the JSON Logic structure without validating the logical correctness of the expressions.
+</Note>

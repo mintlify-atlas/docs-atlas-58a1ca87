@@ -1,0 +1,176 @@
+---
+title: Installation
+description: Install jsonlogic2sql in your Go project
+---
+
+## Prerequisites
+
+- Go 1.19 or later
+- Go modules enabled (default in Go 1.16+)
+
+## Install the library
+
+Install jsonlogic2sql using Go modules:
+
+```bash
+go get github.com/h22rana/jsonlogic2sql@latest
+```
+
+This will download the library and add it to your `go.mod` file.
+
+## Import in your code
+
+Import the library in your Go files:
+
+```go
+import "github.com/h22rana/jsonlogic2sql"
+```
+
+## Verify installation
+
+Create a simple program to verify the installation:
+
+```go main.go
+package main
+
+import (
+    "fmt"
+    "github.com/h22rana/jsonlogic2sql"
+)
+
+func main() {
+    sql, err := jsonlogic2sql.Transpile(
+        jsonlogic2sql.DialectBigQuery,
+        `{">": [{"var": "amount"}, 1000]}`,
+    )
+    if err != nil {
+        panic(err)
+    }
+    fmt.Println(sql) // Output: WHERE amount > 1000
+}
+```
+
+Run the program:
+
+```bash
+go run main.go
+```
+
+You should see:
+
+```
+WHERE amount > 1000
+```
+
+## Interactive REPL
+
+The library includes an interactive REPL for testing JSON Logic expressions. To use it:
+
+<Steps>
+  <Step title="Clone the repository">
+    ```bash
+    git clone https://github.com/h22rana/jsonlogic2sql.git
+    cd jsonlogic2sql
+    ```
+  </Step>
+
+  <Step title="Run the REPL">
+    ```bash
+    make run
+    ```
+  </Step>
+
+  <Step title="Test expressions">
+    ```
+    [BigQuery] jsonlogic> {">": [{"var": "amount"}, 1000]}
+    SQL: WHERE amount > 1000
+
+    [BigQuery] jsonlogic> :dialect
+    Select dialect: PostgreSQL
+
+    [PostgreSQL] jsonlogic> {"merge": [{"var": "a"}, {"var": "b"}]}
+    SQL: WHERE (a || b)
+    ```
+  </Step>
+</Steps>
+
+## Development setup
+
+If you want to contribute or run tests:
+
+<Steps>
+  <Step title="Clone the repository">
+    ```bash
+    git clone https://github.com/h22rana/jsonlogic2sql.git
+    cd jsonlogic2sql
+    ```
+  </Step>
+
+  <Step title="Install dependencies">
+    ```bash
+    go mod download
+    ```
+  </Step>
+
+  <Step title="Run tests">
+    ```bash
+    make test
+    ```
+
+    The library includes over 3,000 test cases.
+  </Step>
+
+  <Step title="Build the REPL">
+    ```bash
+    make build
+    ```
+  </Step>
+
+  <Step title="Run the linter">
+    ```bash
+    make lint
+    ```
+  </Step>
+</Steps>
+
+## Available make commands
+
+| Command | Description |
+|---------|-------------|
+| `make test` | Run all tests (3,000+ test cases) |
+| `make build` | Build REPL binary |
+| `make lint` | Run linter |
+| `make run` | Run REPL |
+
+## Update to latest version
+
+Update the library to the latest version:
+
+```bash
+go get -u github.com/h22rana/jsonlogic2sql@latest
+```
+
+## Install a specific version
+
+Install a specific version by tag:
+
+```bash
+go get github.com/h22rana/jsonlogic2sql@v1.0.0
+```
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Get up and running with your first transpilation
+  </Card>
+  <Card title="Operators" icon="function" href="/concepts/operators">
+    Learn about all supported operators
+  </Card>
+  <Card title="Examples" icon="code" href="/examples/basic">
+    See comprehensive examples
+  </Card>
+  <Card title="API reference" icon="book" href="/api/overview">
+    Explore the full API documentation
+  </Card>
+</CardGroup>
