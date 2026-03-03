@@ -1,0 +1,135 @@
+{
+  "projectType": "sdk-library",
+  "projectName": "jsonlogic2sql",
+  "projectDescription": "A Go library that converts JSON Logic expressions into SQL WHERE clauses with support for multiple SQL dialects",
+  "theme": "aspen",
+  "primaryColor": "#00ADD8",
+  "lightColor": "#5DC9E2",
+  "darkColor": "#00758F",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "installation"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "concepts/operators",
+              "concepts/dialects",
+              "concepts/transpilation"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/basic-usage",
+              "guides/custom-operators",
+              "guides/schema-validation",
+              "guides/error-handling",
+              "guides/repl"
+            ]
+          },
+          {
+            "group": "Advanced",
+            "pages": [
+              "advanced/dialect-aware-operators",
+              "advanced/operator-registry",
+              "advanced/performance"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Overview",
+            "pages": [
+              "api/overview"
+            ]
+          },
+          {
+            "group": "Core API",
+            "pages": [
+              "api/transpiler",
+              "api/functions",
+              "api/types"
+            ]
+          },
+          {
+            "group": "Operators",
+            "pages": [
+              "api/operators/data-access",
+              "api/operators/logical",
+              "api/operators/numeric",
+              "api/operators/array",
+              "api/operators/string"
+            ]
+          },
+          {
+            "group": "Schema",
+            "pages": [
+              "api/schema"
+            ]
+          },
+          {
+            "group": "Errors",
+            "pages": [
+              "api/errors"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Examples",
+        "groups": [
+          {
+            "group": "Examples",
+            "pages": [
+              "examples/basic",
+              "examples/complex-queries",
+              "examples/custom-operators",
+              "examples/schema-validation",
+              "examples/dialect-specific"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Complete JSON Logic operator support (data access, logical, numeric, array, string operations)",
+    "Multi-dialect SQL generation (BigQuery, Spanner, PostgreSQL, DuckDB, ClickHouse)",
+    "Custom operator registration with dialect-aware support",
+    "Schema validation with field type checking and enum validation",
+    "Structured error handling with error codes and JSONPath locations",
+    "Interactive REPL for testing and experimentation",
+    "Thread-safe operator registry for custom extensions",
+    "Support for both WHERE clauses and standalone conditions"
+  ],
+  "publicApiSurface": [
+    "Transpile(dialect, jsonLogic) - Convert JSON Logic string to SQL WHERE clause",
+    "TranspileCondition(dialect, jsonLogic) - Convert JSON Logic to SQL condition without WHERE",
+    "NewTranspiler(dialect) - Create transpiler instance",
+    "NewTranspilerWithConfig(config) - Create transpiler with custom configuration",
+    "Transpiler.RegisterOperator(name, handler) - Register custom operator",
+    "Transpiler.RegisterOperatorFunc(name, func) - Register custom operator function",
+    "Transpiler.RegisterDialectAwareOperator(name, handler) - Register dialect-aware operator",
+    "Transpiler.SetSchema(schema) - Configure schema validation",
+    "NewSchema(fields) - Create schema from field definitions",
+    "NewSchemaFromJSON(data) - Create schema from JSON",
+    "NewSchemaFromFile(path) - Load schema from file",
+    "NewOperatorRegistry() - Create custom operator registry",
+    "AsTranspileError(err) - Extract structured error information",
+    "IsErrorCode(err, code) - Check error code",
+    "DialectBigQuery, DialectSpanner, DialectPostgreSQL, DialectDuckDB, DialectClickHouse - SQL dialect constants"
+  ]
+}
